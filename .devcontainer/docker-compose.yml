@@ -1,0 +1,33 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ..:/workspace:cached
+      - node_modules:/workspace/apps/web/node_modules
+      - pycache:/workspace/apps/api/__pycache__
+    command: sleep infinity
+    network_mode: service:db
+    depends_on:
+      - db
+
+  db:
+    image: aqtbrodh2awvkc.xuanyuan.run/pgvector/pgvector:pg16
+    restart: unless-stopped
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    environment:
+      POSTGRES_USER: xiaoyi
+      POSTGRES_PASSWORD: xiaoyi_dev_2025
+      POSTGRES_DB: xiaoyi_db
+    ports:
+      - "5432:5432"
+
+volumes:
+  postgres_data:
+  node_modules:
+  pycache:
