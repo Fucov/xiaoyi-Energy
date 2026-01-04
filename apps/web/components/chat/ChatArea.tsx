@@ -7,13 +7,62 @@ import { QuickSuggestions } from './QuickSuggestions'
 import { AnalysisCards } from './AnalysisCards'
 import { cn } from '@/lib/utils'
 
+// 步骤状态
+export type StepStatus = 'pending' | 'running' | 'completed' | 'failed'
+
+// 步骤定义
+export interface Step {
+  id: string
+  name: string
+  status: StepStatus
+  message?: string
+}
+
+// 消息内容类型
+export type MessageContentType = 'text' | 'chart' | 'table'
+
+// 文本内容
+export interface TextContent {
+  type: 'text'
+  text: string
+}
+
+// 图表内容
+export interface ChartContent {
+  type: 'chart'
+  title?: string
+  data: {
+    labels: string[]
+    datasets: {
+      label: string
+      data: number[]
+      color?: string
+    }[]
+  }
+  chartType?: 'line' | 'bar' | 'area'
+}
+
+// 表格内容
+export interface TableContent {
+  type: 'table'
+  title?: string
+  headers: string[]
+  rows: (string | number)[][]
+}
+
 // 消息类型定义
 export interface Message {
   id: string
   role: 'user' | 'assistant'
-  content: string
   timestamp: string
-  // 分析结果附件（可选）
+  // 内容（支持多种类型，可以是单个或多个）
+  content?: TextContent | ChartContent | TableContent
+  contents?: (TextContent | ChartContent | TableContent)[]
+  // 旧版兼容：纯文本内容
+  text?: string
+  // 步骤进度（仅assistant消息）
+  steps?: Step[]
+  // 分析结果附件（可选，保留兼容）
   analysis?: {
     reportConsensus?: {
       totalReports: number
@@ -34,18 +83,29 @@ export interface Message {
   }
 }
 
-// 模拟消息数据
+// 预测步骤定义（7个步骤）
+export const PREDICTION_STEPS: Omit<Step, 'status' | 'message'>[] = [
+  { id: '1', name: '数据获取与预处理' },
+  { id: '2', name: '时序特征分析' },
+  { id: '3', name: '异常检测' },
+  { id: '4', name: '模型训练与评估' },
+  { id: '5', name: '预测生成' },
+  { id: '6', name: '结果可视化' },
+  { id: '7', name: '分析完成' },
+]
+
+// 模拟消息数据（兼容旧格式）
 const mockMessages: Message[] = [
   {
     id: '1',
     role: 'user',
-    content: '帮我分析一下茅台，预测下个季度走势，结合最新的研报观点',
+    text: '帮我分析一下茅台，预测下个季度走势，结合最新的研报观点',
     timestamp: '14:32',
   },
   {
     id: '2',
     role: 'assistant',
-    content: '好的！我来为你分析 **600519.SH 贵州茅台**',
+    text: '好的！我来为你分析 **600519.SH 贵州茅台**',
     timestamp: '14:32',
     analysis: {
       reportConsensus: {
@@ -82,21 +142,99 @@ const quickSuggestions = [
 export function ChatArea() {
   const [messages, setMessages] = useState<Message[]>(mockMessages)
   const [inputValue, setInputValue] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
 
-  const handleSend = () => {
-    if (!inputValue.trim()) return
+  const handleSend = async () => {
+    if (!inputValue.trim() || isLoading) return
     
-    // 添加用户消息
-    const newMessage: Message = {
+    const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
-      content: inputValue,
+      text: inputValue,
       timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
     }
-    setMessages([...messages, newMessage])
-    setInputValue('')
     
-    // TODO: 调用 API 获取 AI 响应
+    setMessages((prev: Message[]) => [...prev, userMessage])
+    setInputValue('')
+    setIsLoading(true)
+    
+    // 创建AI消息占位符
+    const assistantMessageId = (Date.now() + 1).toString()
+    const assistantMessage: Message = {
+      id: assistantMessageId,
+      role: 'assistant',
+      timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+      steps: PREDICTION_STEPS.map(step => ({
+        ...step,
+        status: 'pending' as const,
+      })),
+    }
+    
+    setMessages((prev: Message[]) => [...prev, assistantMessage])
+    
+    try {
+      // 导入API函数
+      const { sendMessageStream } = await import('@/lib/api/chat')
+      
+      // 处理流式响应
+      const contents: (TextContent | ChartContent | TableContent)[] = []
+      
+      for await (const chunk of sendMessageStream(inputValue, (steps: Step[]) => {
+        // 更新步骤状态
+        setMessages((prev: Message[]) => prev.map((msg: Message) => 
+          msg.id === assistantMessageId 
+            ? { ...msg, steps }
+            : msg
+        ))
+      })) {
+        if (chunk.type === 'content') {
+          contents.push(chunk.data)
+          
+          // 更新消息内容，累积所有内容
+          setMessages((prev: Message[]) => prev.map((msg: Message) => 
+            msg.id === assistantMessageId 
+              ? { 
+                  ...msg, 
+                  contents: [...contents],
+                  // 如果所有步骤完成，清除steps
+                  steps: msg.steps?.every((s: Step) => s.status === 'completed') ? undefined : msg.steps
+                }
+              : msg
+          ))
+        }
+      }
+      
+      // 所有内容接收完成，清除步骤显示
+      if (contents.length > 0) {
+        setMessages((prev: Message[]) => prev.map((msg: Message) => 
+          msg.id === assistantMessageId 
+            ? { 
+                ...msg, 
+                contents: contents,
+                steps: undefined
+              }
+            : msg
+        ))
+      }
+      
+    } catch (error) {
+      console.error('发送消息失败:', error)
+      // 更新消息显示错误
+      setMessages((prev: Message[]) => prev.map((msg: Message) => 
+        msg.id === assistantMessageId 
+          ? { 
+              ...msg, 
+              contents: [{ 
+                type: 'text', 
+                text: '抱歉，处理请求时出现错误，请稍后重试。' 
+              }],
+              steps: undefined
+            }
+          : msg
+      ))
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -135,7 +273,7 @@ export function ChatArea() {
 
       {/* 对话区域 */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {messages.map((message) => (
+        {messages.map((message: Message) => (
           <div key={message.id}>
             <MessageBubble message={message} />
             {/* 如果有分析结果，显示分析卡片 */}
@@ -181,7 +319,7 @@ export function ChatArea() {
             <button 
               className="p-3 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-xl transition-all hover-lift flex-shrink-0 disabled:opacity-50"
               onClick={handleSend}
-              disabled={!inputValue.trim()}
+              disabled={!inputValue.trim() || isLoading}
             >
               <Send className="w-5 h-5" />
             </button>

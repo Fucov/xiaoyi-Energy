@@ -3,6 +3,8 @@
 import { cn } from '@/lib/utils'
 import { Copy, ThumbsUp, ThumbsDown, RotateCcw } from 'lucide-react'
 import type { Message } from './ChatArea'
+import { MessageContent } from './MessageContent'
+import { StepProgress } from './StepProgress'
 
 interface MessageBubbleProps {
   message: Message
@@ -10,6 +12,9 @@ interface MessageBubbleProps {
 
 export function MessageBubble({ message }: MessageBubbleProps) {
   const isUser = message.role === 'user'
+
+  // 兼容旧版text字段
+  const displayText = message.text || (message.content?.type === 'text' ? message.content.text : '')
 
   return (
     <div className={cn(
@@ -24,19 +29,58 @@ export function MessageBubble({ message }: MessageBubbleProps) {
       )}
 
       <div className={cn(
-        "max-w-[70%] group",
+        "max-w-[85%] group",
         isUser ? "order-first" : ""
       )}>
         {/* 消息内容 */}
-        <div className={cn(
-          "px-4 py-3 rounded-2xl text-[15px] leading-relaxed",
-          isUser 
-            ? "bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-br-md" 
-            : "glass text-gray-200 rounded-bl-md"
-        )}>
-          {/* TODO: 支持 Markdown 渲染 - 可以让新手来实现 */}
-          <MessageContent content={message.content} />
-        </div>
+        {isUser ? (
+          // 用户消息：纯文本
+          <div className="px-4 py-3 rounded-2xl text-[15px] leading-relaxed bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-br-md">
+            {displayText}
+          </div>
+        ) : (
+          // AI消息：支持多种内容类型
+          <div className="space-y-3">
+            {/* 步骤进度 */}
+            {message.steps && message.steps.length > 0 && (
+              <div className="glass rounded-2xl px-4 py-3">
+                <StepProgress steps={message.steps} />
+              </div>
+            )}
+            
+            {/* 多个内容块 */}
+            {message.contents && message.contents.length > 0 && (
+              <>
+                {message.contents.map((content, index) => (
+                  <div key={index} className="glass rounded-2xl px-4 py-3 text-gray-200">
+                    <MessageContent content={content} />
+                  </div>
+                ))}
+              </>
+            )}
+            
+            {/* 单个内容（兼容） */}
+            {message.content && !message.contents && (
+              <div className="glass rounded-2xl px-4 py-3 text-gray-200">
+                <MessageContent content={message.content} />
+              </div>
+            )}
+            
+            {/* 兼容旧版：纯文本内容 */}
+            {displayText && !message.content && !message.contents && (
+              <div className="glass rounded-2xl px-4 py-3 text-[15px] leading-relaxed text-gray-200 rounded-bl-md">
+                <MessageContent content={{ type: 'text', text: displayText }} />
+              </div>
+            )}
+            
+            {/* 分析结果卡片（保留兼容） */}
+            {message.analysis && (
+              <div className="mt-2">
+                {/* AnalysisCards 组件会在 ChatArea 中单独渲染 */}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* 消息底部操作 */}
         <div className={cn(
@@ -64,23 +108,6 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         </div>
       )}
     </div>
-  )
-}
-
-// 消息内容渲染 - 简单版本，可以让新手扩展为完整 Markdown 支持
-function MessageContent({ content }: { content: string }) {
-  // 简单的加粗处理 **text**
-  const parts = content.split(/(\*\*[^*]+\*\*)/g)
-  
-  return (
-    <>
-      {parts.map((part, i) => {
-        if (part.startsWith('**') && part.endsWith('**')) {
-          return <strong key={i} className="font-semibold text-violet-300">{part.slice(2, -2)}</strong>
-        }
-        return <span key={i}>{part}</span>
-      })}
-    </>
   )
 }
 
