@@ -94,53 +94,16 @@ export const PREDICTION_STEPS: Omit<Step, 'status' | 'message'>[] = [
   { id: '7', name: '分析完成' },
 ]
 
-// 模拟消息数据（兼容旧格式）
-const mockMessages: Message[] = [
-  {
-    id: '1',
-    role: 'user',
-    text: '帮我分析一下茅台，预测下个季度走势，结合最新的研报观点',
-    timestamp: '14:32',
-  },
-  {
-    id: '2',
-    role: 'assistant',
-    text: '好的！我来为你分析 **600519.SH 贵州茅台**',
-    timestamp: '14:32',
-    analysis: {
-      reportConsensus: {
-        totalReports: 12,
-        ratings: { buy: 8, hold: 4, sell: 0 },
-        avgTargetPrice: 2180,
-        currentPrice: 1850,
-      },
-      modelPrediction: {
-        model: 'AutoARIMA',
-        prediction: 8.5,
-        mase: 0.82,
-        confidenceInterval: [1920, 2050],
-      },
-      anomalyDetection: {
-        count: 2,
-        anomalies: [
-          { date: '2024-11-15', change: -4.2 },
-          { date: '2024-10-28', change: 5.8 },
-        ],
-      },
-    },
-  },
-]
-
+// 引导性问题建议
 const quickSuggestions = [
-  '📊 查看详细预测图表',
-  '📝 生成投资分析报告',
-  '🔔 设置价格预警',
-  '📈 对比其他白酒股',
-  '⚠️ 分析异常波动原因',
+  '帮我分析一下茅台，预测下个季度走势',
+  '查看最近的市场趋势',
+  '对比几只白酒股的表现',
+  '生成一份投资分析报告',
 ]
 
 export function ChatArea() {
-  const [messages, setMessages] = useState<Message[]>(mockMessages)
+  const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
 
@@ -243,54 +206,94 @@ export function ChatArea() {
     }
   }
 
+  const isEmpty = messages.length === 0
+
   return (
     <main className="flex-1 flex flex-col min-w-0">
       {/* 顶部栏 */}
       <header className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-dark-800/30">
         <div className="flex items-center gap-4">
-          <h2 className="text-base font-semibold">茅台 Q1 预测分析</h2>
+          <h2 className="text-base font-semibold">
+            {isEmpty ? '股票分析助手' : '股票分析'}
+          </h2>
+          {!isEmpty && isLoading && (
+            <div className="flex items-center gap-2">
+              <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-[10px] font-medium">
+                分析中
+              </span>
+            </div>
+          )}
+        </div>
+        {!isEmpty && (
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 bg-green-500/20 text-green-400 rounded text-[10px] font-medium">
-              进行中
-            </span>
-            <span className="px-2 py-0.5 bg-violet-500/20 text-violet-400 rounded text-[10px] font-medium">
-              GPT-4o
-            </span>
+            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="导出报告">
+              <Download className="w-4 h-4 text-gray-400" />
+            </button>
+            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="分享">
+              <Share2 className="w-4 h-4 text-gray-400" />
+            </button>
+            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="更多">
+              <MoreVertical className="w-4 h-4 text-gray-400" />
+            </button>
           </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="导出报告">
-            <Download className="w-4 h-4 text-gray-400" />
-          </button>
-          <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="分享">
-            <Share2 className="w-4 h-4 text-gray-400" />
-          </button>
-          <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="更多">
-            <MoreVertical className="w-4 h-4 text-gray-400" />
-          </button>
-        </div>
+        )}
       </header>
 
       {/* 对话区域 */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        {messages.map((message: Message) => (
-          <div key={message.id}>
-            <MessageBubble message={message} />
-            {/* 如果有分析结果，显示分析卡片 */}
-            {message.analysis && (
-              <div className="mt-4 ml-13">
-                <AnalysisCards analysis={message.analysis} />
+        {isEmpty ? (
+          /* 空状态 - 欢迎界面 */
+          <div className="flex flex-col items-center justify-center h-full -mt-20">
+            <div className="text-center max-w-md">
+              <h3 className="text-2xl font-semibold text-gray-200 mb-3">
+                有什么可以帮忙的？
+              </h3>
+              <p className="text-gray-400 text-sm mb-8">
+                我可以帮你分析股票走势、预测市场趋势、生成投资报告等
+              </p>
+              <div className="flex flex-col gap-3">
+                {quickSuggestions.map((suggestion, index) => (
+                  <button
+                    key={index}
+                    onClick={() => {
+                      setInputValue(suggestion)
+                      // 自动聚焦到输入框
+                      setTimeout(() => {
+                        const textarea = document.querySelector('textarea')
+                        textarea?.focus()
+                      }, 100)
+                    }}
+                    className="px-4 py-3 bg-dark-600/50 hover:bg-dark-500/50 border border-white/5 hover:border-violet-500/30 rounded-xl text-left text-sm text-gray-300 hover:text-gray-100 transition-all"
+                  >
+                    {suggestion}
+                  </button>
+                ))}
               </div>
-            )}
+            </div>
           </div>
-        ))}
+        ) : (
+          /* 消息列表 */
+          messages.map((message: Message) => (
+            <div key={message.id}>
+              <MessageBubble message={message} />
+              {/* 如果有分析结果，显示分析卡片 */}
+              {message.analysis && (
+                <div className="mt-4 ml-13">
+                  <AnalysisCards analysis={message.analysis} />
+                </div>
+              )}
+            </div>
+          ))
+        )}
       </div>
 
-      {/* 快捷建议 */}
-      <QuickSuggestions 
-        suggestions={quickSuggestions} 
-        onSelect={(suggestion) => setInputValue(suggestion)}
-      />
+      {/* 快捷建议 - 只在有消息时显示 */}
+      {!isEmpty && (
+        <QuickSuggestions 
+          suggestions={quickSuggestions} 
+          onSelect={(suggestion) => setInputValue(suggestion)}
+        />
+      )}
 
       {/* 输入区域 */}
       <div className="p-4 border-t border-white/5 bg-dark-800/50">
