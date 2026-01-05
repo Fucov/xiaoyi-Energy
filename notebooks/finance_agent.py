@@ -5,7 +5,7 @@
 完整管道: 自然语言 → AKShare数据 → 时序预测 → 分析报告
 
 依赖:
-    pip install prophet pydantic-ai akshare pandas matplotlib openai
+    pip install prophet xgboost pydantic-ai akshare pandas matplotlib openai
 
 环境变量:
     DEEPSEEK_API_KEY: DeepSeek API Key
@@ -18,7 +18,7 @@ import numpy as np
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from dataclasses import dataclass
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from openai import OpenAI
 
 # ============================================================
@@ -61,14 +61,13 @@ class AnalysisConfig(BaseModel):
 
 class PipelineResult(BaseModel):
     """管道结果"""
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+    
     data_config: Dict[str, Any]
     features: Dict[str, Any]
     forecast: List[Dict[str, Any]]
     metrics: Dict[str, float]
     analysis: str
-    
-    class Config:
-        arbitrary_types_allowed = True
 
 
 # ============================================================
@@ -114,6 +113,7 @@ class NLPAgent:
 - 日期格式 YYYYMMDD
 - 今天: {today.strftime('%Y-%m-%d')}
 - 一年前: {one_year_ago.strftime('%Y-%m-%d')}
+- model 字段固定返回 "prophet"（实际模型选择由外部参数控制）
 - 只返回 JSON
 """
         
@@ -265,6 +265,189 @@ class TimeSeriesAnalyzer:
             "metrics": {"mae": round(mae, 4)},
             "model": "prophet"
         }
+    
+    @staticmethod
+    def _create_features(df: pd.DataFrame, max_lag: int = 30) -> pd.DataFrame:
+        """创建时序特征用于 XGBoost"""
+        feature_df = df.copy()
+        
+        # 滞后特征
+        for lag in [1, 7, 14, 30]:
+            if lag <= max_lag and lag < len(feature_df):
+                feature_df[f"lag_{lag}"] = feature_df["y"].shift(lag)
+        
+        # 移动平均
+        for window in [7, 14, 30]:
+            if window < len(feature_df):
+                feature_df[f"ma_{window}"] = feature_df["y"].rolling(window=window, min_periods=1).mean()
+                feature_df[f"std_{window}"] = feature_df["y"].rolling(window=window, min_periods=1).std()
+        
+        # 时间特征
+        feature_df["day_of_week"] = feature_df["ds"].dt.dayofweek
+        feature_df["day_of_month"] = feature_df["ds"].dt.day
+        feature_df["month"] = feature_df["ds"].dt.month
+        feature_df["quarter"] = feature_df["ds"].dt.quarter
+        
+        # 趋势特征
+        feature_df["trend"] = np.arange(len(feature_df))
+        
+        # 填充 NaN（由滞后和移动平均产生）
+        feature_df = feature_df.bfill().fillna(0)
+        
+        return feature_df
+    
+    @staticmethod
+    def forecast_xgboost(df: pd.DataFrame, horizon: int = 30) -> Dict[str, Any]:
+        """XGBoost 预测"""
+        try:
+            import xgboost as xgb
+        except ImportError:
+            raise ImportError("请安装 xgboost: pip install xgboost")
+        
+        # 检查数据量
+        if len(df) < 60:
+            raise ValueError(f"XGBoost 需要至少60条历史数据，当前只有 {len(df)} 条")
+        
+        # 创建特征
+        feature_df = TimeSeriesAnalyzer._create_features(df, max_lag=min(30, len(df) // 2))
+        
+        # 准备训练数据
+        feature_cols = [col for col in feature_df.columns if col not in ["ds", "y"]]
+        X = feature_df[feature_cols].values
+        y = feature_df["y"].values
+        
+        # 划分训练集（使用最后20%作为验证集）
+        split_idx = int(len(X) * 0.8)
+        X_train, X_val = X[:split_idx], X[split_idx:]
+        y_train, y_val = y[:split_idx], y[split_idx:]
+        
+        # 训练模型
+        model = xgb.XGBRegressor(
+            n_estimators=100,
+            max_depth=5,
+            learning_rate=0.1,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            n_jobs=-1
+        )
+        # 兼容不同版本的 XGBoost
+        # XGBoost 2.0+ 使用 callbacks，旧版本使用 early_stopping_rounds
+        try:
+            # 尝试新版本方式 (XGBoost 2.0+)
+            try:
+                early_stop = xgb.callback.EarlyStopping(rounds=10, save_best=True)
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    callbacks=[early_stop],
+                    verbose=False
+                )
+            except (AttributeError, TypeError):
+                # 如果 callback 方式失败，尝试旧版本方式
+                model.fit(
+                    X_train, y_train,
+                    eval_set=[(X_val, y_val)],
+                    early_stopping_rounds=10,
+                    verbose=False
+                )
+        except TypeError:
+            # 如果两种方式都失败，不使用 early stopping
+            model.fit(
+                X_train, y_train,
+                eval_set=[(X_val, y_val)],
+                verbose=False
+            )
+        
+        # 在训练集上预测以计算残差
+        train_pred = model.predict(X)
+        residuals = y - train_pred
+        std_error = np.std(residuals)
+        
+        # 递归预测未来值
+        forecast_values = []
+        last_features = feature_df.iloc[-1].copy()
+        last_date = df["ds"].iloc[-1]
+        last_values = df["y"].values[-30:].tolist()  # 保存最近30个值用于特征计算
+        
+        for i in range(horizon):
+            # 创建未来日期
+            future_date = last_date + timedelta(days=i + 1)
+            
+            # 准备特征
+            future_features = pd.Series(index=feature_df.columns, dtype=float)
+            
+            # 滞后特征（使用预测值或历史值）
+            if i == 0:
+                future_features["lag_1"] = last_features["y"]
+            else:
+                future_features["lag_1"] = forecast_values[-1]["value"]
+            
+            for lag in [7, 14, 30]:
+                lag_col = f"lag_{lag}"
+                if lag_col in feature_cols:
+                    if i + 1 >= lag:
+                        if i + 1 - lag < len(forecast_values):
+                            future_features[lag_col] = forecast_values[i + 1 - lag]["value"]
+                        else:
+                            idx = len(last_values) - (lag - (i + 1))
+                            future_features[lag_col] = last_values[idx] if idx >= 0 else last_values[0]
+                    else:
+                        idx = len(last_values) - (lag - i - 1)
+                        future_features[lag_col] = last_values[idx] if idx >= 0 else last_values[0]
+            
+            # 移动平均（使用历史值和预测值）
+            all_values = last_values + [f["value"] for f in forecast_values]
+            for window in [7, 14, 30]:
+                ma_col = f"ma_{window}"
+                std_col = f"std_{window}"
+                if ma_col in feature_cols:
+                    window_values = all_values[-window:] if len(all_values) >= window else all_values
+                    future_features[ma_col] = np.mean(window_values)
+                    future_features[std_col] = np.std(window_values) if len(window_values) > 1 else 0
+            
+            # 时间特征
+            future_features["day_of_week"] = future_date.dayofweek
+            future_features["day_of_month"] = future_date.day
+            future_features["month"] = future_date.month
+            future_features["quarter"] = future_date.quarter
+            
+            # 趋势特征
+            future_features["trend"] = len(df) + i + 1
+            
+            # 填充缺失值
+            for col in feature_cols:
+                if pd.isna(future_features[col]):
+                    future_features[col] = feature_df[col].iloc[-1] if col in feature_df.columns else 0
+            
+            # 预测
+            X_future = future_features[feature_cols].values.reshape(1, -1)
+            pred_value = model.predict(X_future)[0]
+            
+            # 计算置信区间（使用历史残差的标准差）
+            lower = pred_value - 1.96 * std_error
+            upper = pred_value + 1.96 * std_error
+            
+            forecast_values.append({
+                "date": future_date.strftime("%Y-%m-%d"),
+                "value": round(float(pred_value), 2),
+                "lower": round(float(lower), 2),
+                "upper": round(float(upper), 2),
+            })
+        
+        # 计算验证集 MAE
+        val_pred = model.predict(X_val)
+        mae = np.mean(np.abs(y_val - val_pred))
+        rmse = np.sqrt(np.mean((y_val - val_pred) ** 2))
+        
+        return {
+            "forecast": forecast_values,
+            "metrics": {
+                "mae": round(float(mae), 4),
+                "rmse": round(float(rmse), 4)
+            },
+            "model": "xgboost"
+        }
 
 
 # ============================================================
@@ -342,12 +525,13 @@ class FinanceChatAgent:
         self.nlp = NLPAgent(self.api_key)
         self.reporter = ReportGenerator(self.api_key)
     
-    def chat(self, user_input: str, verbose: bool = True) -> Dict[str, Any]:
+    def chat(self, user_input: str, model: str = "prophet", verbose: bool = True) -> Dict[str, Any]:
         """
         对话接口
         
         Args:
             user_input: 用户自然语言输入
+            model: 预测模型，可选 "prophet" 或 "xgboost"，默认为 "prophet"
             verbose: 是否打印过程
             
         Returns:
@@ -393,11 +577,22 @@ class FinanceChatAgent:
             print("\n🔮 Step 4: 执行预测...")
         
         horizon = analysis_config.get("forecast_horizon", 30)
-        forecast_result = TimeSeriesAnalyzer.forecast_prophet(df, horizon)
+        # 使用传入的 model 参数，覆盖 NLP Agent 返回的模型选择
+        model_name = model.lower() if model else analysis_config.get("model", "prophet").lower()
+        
+        # 验证模型名称
+        if model_name not in ["prophet", "xgboost"]:
+            raise ValueError(f"不支持的模型: {model_name}。支持: 'prophet', 'xgboost'")
+        
+        if model_name == "prophet":
+            forecast_result = TimeSeriesAnalyzer.forecast_prophet(df, horizon)
+        else:  # xgboost
+            forecast_result = TimeSeriesAnalyzer.forecast_xgboost(df, horizon)
         
         if verbose:
             print(f"   → 模型: {forecast_result['model']}")
-            print(f"   → MAE: {forecast_result['metrics']['mae']}")
+            metrics_str = ", ".join([f"{k.upper()}: {v}" for k, v in forecast_result['metrics'].items()])
+            print(f"   → 指标: {metrics_str}")
         
         # Step 5: 生成报告
         if verbose:
@@ -447,11 +642,13 @@ class FinanceChatAgent:
         # 预测
         dates = pd.to_datetime([f["date"] for f in forecast])
         values = [f["value"] for f in forecast]
-        lower = [f["lower"] for f in forecast]
-        upper = [f["upper"] for f in forecast]
+        lower = [f.get("lower") for f in forecast]
+        upper = [f.get("upper") for f in forecast]
         
         ax.plot(dates, values, label="预测", color="red", lw=2, ls="--")
-        ax.fill_between(dates, lower, upper, alpha=0.2, color="red")
+        # 只有当置信区间存在时才绘制
+        if all(l is not None and u is not None for l, u in zip(lower, upper)):
+            ax.fill_between(dates, lower, upper, alpha=0.2, color="red")
         
         ax.set_title(title or "时序预测")
         ax.legend()
@@ -466,16 +663,21 @@ class FinanceChatAgent:
 # 便捷函数
 # ============================================================
 
-def chat(query: str, api_key: str = None) -> Dict[str, Any]:
+def chat(query: str, model: str = "prophet", api_key: str = None) -> Dict[str, Any]:
     """
     快速对话接口
     
+    Args:
+        query: 用户自然语言输入
+        model: 预测模型，可选 "prophet" 或 "xgboost"，默认为 "prophet"
+        api_key: DeepSeek API Key，如果不提供则从环境变量读取
+    
     Example:
-        result = chat("分析平安银行近一年走势，预测未来30天")
+        result = chat("分析平安银行近一年走势，预测未来30天", model="xgboost")
         print(result["report"])
     """
     agent = FinanceChatAgent(api_key)
-    return agent.chat(query)
+    return agent.chat(query, model=model)
 
 
 # ============================================================

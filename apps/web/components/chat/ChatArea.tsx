@@ -106,6 +106,7 @@ export function ChatArea() {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<'prophet' | 'xgboost'>('prophet')
 
   const handleSend = async () => {
     if (!inputValue.trim() || isLoading) return
@@ -142,7 +143,7 @@ export function ChatArea() {
       // 处理流式响应
       const contents: (TextContent | ChartContent | TableContent)[] = []
       
-      for await (const chunk of sendMessageStreamReal(inputValue, (steps: Step[]) => {
+      for await (const chunk of sendMessageStreamReal(inputValue, selectedModel, (steps: Step[]) => {
         // 更新步骤状态
         setMessages((prev: Message[]) => prev.map((msg: Message) => 
           msg.id === assistantMessageId 
@@ -298,6 +299,40 @@ export function ChatArea() {
       {/* 输入区域 */}
       <div className="p-4 border-t border-white/5 bg-dark-800/50">
         <div className="max-w-4xl mx-auto">
+          {/* 模型选择器 */}
+          <div className="flex items-center gap-3 mb-3 px-1">
+            <span className="text-xs text-gray-500">预测模型:</span>
+            <div className="flex items-center gap-2 bg-dark-700/50 rounded-lg p-1 border border-white/5">
+              <button
+                onClick={() => setSelectedModel('prophet')}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                  selectedModel === 'prophet'
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-gray-400 hover:text-gray-200"
+                )}
+              >
+                Prophet
+              </button>
+              <button
+                onClick={() => setSelectedModel('xgboost')}
+                className={cn(
+                  "px-3 py-1.5 text-xs font-medium rounded-md transition-all",
+                  selectedModel === 'xgboost'
+                    ? "bg-violet-600 text-white shadow-sm"
+                    : "text-gray-400 hover:text-gray-200"
+                )}
+              >
+                XGBoost
+              </button>
+            </div>
+            <span className="text-[10px] text-gray-600 ml-auto">
+              {selectedModel === 'prophet' 
+                ? '适合长期预测，自动处理季节性' 
+                : '适合中短期预测，捕捉非线性关系'}
+            </span>
+          </div>
+          
           <div className="flex items-end gap-3">
             {/* 附件按钮 */}
             <button className="p-2.5 hover:bg-dark-600 rounded-xl transition-colors flex-shrink-0" title="上传文件">

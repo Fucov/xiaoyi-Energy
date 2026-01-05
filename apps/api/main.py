@@ -44,6 +44,7 @@ app.add_middleware(
 
 class ChatRequest(BaseModel):
     message: str
+    model: str = "prophet"  # 预测模型，可选 "prophet" 或 "xgboost"
 
 # 步骤定义
 STEPS = [
@@ -251,6 +252,12 @@ async def chat_stream(request: ChatRequest):
             
             agent = FinanceChatAgent(api_key)
             user_input = request.message
+            model = request.model.lower() if request.model else "prophet"
+            
+            # 验证模型名称
+            if model not in ["prophet", "xgboost"]:
+                yield format_sse("error", {"message": f"不支持的模型: {model}。支持: 'prophet', 'xgboost'"})
+                return
             
             # 初始化步骤状态
             steps = [{"id": s["id"], "name": s["name"], "status": "pending"} for s in STEPS]
@@ -322,10 +329,17 @@ async def chat_stream(request: ChatRequest):
             await asyncio.sleep(0.1)
             
             horizon = analysis_config.get("forecast_horizon", 30)
-            forecast_result = await asyncio.to_thread(TimeSeriesAnalyzer.forecast_prophet, df, horizon)
             
+            # 根据选择的模型进行预测
+            if model == "prophet":
+                forecast_result = await asyncio.to_thread(TimeSeriesAnalyzer.forecast_prophet, df, horizon)
+            else:  # xgboost
+                forecast_result = await asyncio.to_thread(TimeSeriesAnalyzer.forecast_xgboost, df, horizon)
+            
+            # 获取模型指标信息
+            metrics_info = ", ".join([f"{k.upper()}: {v}" for k, v in forecast_result['metrics'].items()])
             steps[3]["status"] = "completed"
-            steps[3]["message"] = f"Prophet 模型最优 (MAE: {forecast_result['metrics']['mae']})"
+            steps[3]["message"] = f"{forecast_result['model'].upper()} 模型训练完成 ({metrics_info})"
             yield format_sse("step", {"steps": steps})
             await asyncio.sleep(0.1)
             
@@ -346,13 +360,13 @@ async def chat_stream(request: ChatRequest):
             yield format_sse("step", {"steps": steps})
             await asyncio.sleep(0.1)
             
-            # 发送模型对比表格
+            # 发送模型性能表格
             model_table = {
                 "type": "table",
-                "title": "模型性能对比",
-                "headers": ["模型", "MAE"],
+                "title": "模型性能指标",
+                "headers": ["指标", "数值"],
                 "rows": [
-                    ["Prophet", forecast_result["metrics"]["mae"]]
+                    [k.upper(), v] for k, v in forecast_result["metrics"].items()
                 ]
             }
             yield format_sse("content", {"content": model_table})

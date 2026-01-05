@@ -242,6 +242,7 @@ async function generateResponseContent(message: string): Promise<(TextContent | 
 // 实际API调用函数（当后端准备好时使用）
 export async function* sendMessageStreamReal(
   message: string,
+  model: string = 'prophet',
   onStepUpdate?: (steps: Step[]) => void
 ): AsyncGenerator<{ type: 'step' | 'content'; data: any }, void, unknown> {
   const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
@@ -249,7 +250,7 @@ export async function* sendMessageStreamReal(
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, model }),
   })
 
   if (!response.ok) {
