@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import { useState } from 'react'
+import Image from 'next/image'
 import { Download, Share2, MoreVertical, Paperclip, Send, Zap } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { QuickSuggestions } from './QuickSuggestions'
@@ -293,6 +295,13 @@ export function ChatArea() {
       {/* 顶部栏 */}
       <header className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-dark-800/30">
         <div className="flex items-center gap-4">
+          <Image
+            src="/logo.svg"
+            alt="Logo"
+            width={28}
+            height={28}
+            className="flex-shrink-0"
+          />
           <h2 className="text-base font-semibold">
             {isEmpty ? '股票分析助手' : '股票分析'}
           </h2>
