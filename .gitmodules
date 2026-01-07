@@ -1,3 +1,0 @@
-[submodule "notebooks/libs/timecopilot"]
-	path = notebooks/libs/timecopilot
-	url = https://github.com/tarpelite/timecopilot.git
