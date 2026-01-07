@@ -4,33 +4,39 @@ on:
   push:
     branches: [main, master]
   pull_request:
-    types: [closed]
+    types: [opened, closed]  # 添加 opened
 
 jobs:
   notify:
     runs-on: self-hosted
-    if: github.event_name == 'push' || github.event.pull_request.merged == true
+    if: |
+      github.event_name == 'push' || 
+      github.event.pull_request.merged == true ||
+      (github.event_name == 'pull_request' && github.event.action == 'opened')
     
     steps:
       - name: Send WPS Notification
+        env:
+          WPS_WEBHOOK: ${{ secrets.WPS_WEBHOOK }}
         run: |
-          if [ "${{ github.event_name }}" == "push" ]; then
-            EVENT_TYPE="Push"
-            BRANCH="${{ github.ref_name }}"
-            AUTHOR="${{ github.actor }}"
-            MESSAGE="${{ github.event.head_commit.message }}"
-            COMMIT_URL="${{ github.event.head_commit.url }}"
-            
-            CONTENT="## 📦 代码推送通知\n\n**分支**: ${BRANCH}\n**提交者**: ${AUTHOR}\n**提交信息**: ${MESSAGE}\n\n[查看提交](${COMMIT_URL})"
-          else
-            EVENT_TYPE="Merge"
-            PR_TITLE="${{ github.event.pull_request.title }}"
-            PR_AUTHOR="${{ github.event.pull_request.user.login }}"
-            PR_URL="${{ github.event.pull_request.html_url }}"
-            
-            CONTENT="## 🔀 PR合并通知\n\n**标题**: ${PR_TITLE}\n**作者**: ${PR_AUTHOR}\n\n[查看PR](${PR_URL})"
+          if [ -z "$WPS_WEBHOOK" ]; then
+            echo "WPS_WEBHOOK 未配置，跳过通知"
+            exit 0
           fi
           
-          curl -X POST "${{ secrets.WPS_WEBHOOK}}" \
+          if [ "${{ github.event_name }}" == "push" ]; then
+            # Push 通知
+            CONTENT="## 📦 代码推送通知\n\n**分支**: ${{ github.ref_name }}\n**提交者**: ${{ github.actor }}\n**提交信息**: ${{ github.event.head_commit.message }}\n\n[查看提交](${{ github.event.head_commit.url }})"
+          
+          elif [ "${{ github.event.action }}" == "opened" ]; then
+            # PR 提出通知
+            CONTENT="## 🆕 新 PR 提出\n\n**标题**: ${{ github.event.pull_request.title }}\n**作者**: ${{ github.event.pull_request.user.login }}\n**目标分支**: ${{ github.event.pull_request.base.ref }}\n**来源分支**: ${{ github.event.pull_request.head.ref }}\n\n[查看 PR](${{ github.event.pull_request.html_url }})"
+          
+          else
+            # PR 合并通知
+            CONTENT="## ✅ PR 已合并\n\n**标题**: ${{ github.event.pull_request.title }}\n**作者**: ${{ github.event.pull_request.user.login }}\n**合并者**: ${{ github.event.pull_request.merged_by.login }}\n\n[查看 PR](${{ github.event.pull_request.html_url }})"
+          fi
+          
+          curl -sS -X POST "$WPS_WEBHOOK" \
             -H "Content-Type: application/json" \
             -d "{\"msgtype\":\"markdown\",\"markdown\":{\"text\":\"${CONTENT}\"}}"
