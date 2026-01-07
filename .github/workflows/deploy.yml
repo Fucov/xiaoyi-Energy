@@ -91,8 +91,15 @@ jobs:
         run: docker image prune -f --filter "until=24h"
 
       - name: 📢 Notify WPS
-        if: always() && secrets.WPS_WEBHOOK != ''
+        if: always()
+        env:
+          WPS_WEBHOOK: ${{ secrets.WPS_WEBHOOK }}
         run: |
+          if [ -z "$WPS_WEBHOOK" ]; then
+            echo "WPS_WEBHOOK 未配置，跳过通知"
+            exit 0
+          fi
+          
           STATUS="${{ job.status }}"
           if [ "$STATUS" = "success" ]; then
             ICON="✅"; TITLE="部署成功"
@@ -102,7 +109,7 @@ jobs:
           
           CONTENT="## ${ICON} ${TITLE}\n\n**分支**: ${{ github.ref_name }}\n**提交者**: ${{ github.actor }}\n**提交**: ${{ github.event.head_commit.message }}\n\n🌐 前端: http://${{ steps.ip.outputs.SERVER_IP }}:13000\n🔌 后端: http://${{ steps.ip.outputs.SERVER_IP }}:18000"
           
-          curl -sS -X POST "${{ secrets.WPS_WEBHOOK }}" \
+          curl -sS -X POST "$WPS_WEBHOOK" \
             -H "Content-Type: application/json" \
             -d "{\"msgtype\":\"markdown\",\"markdown\":{\"text\":\"${CONTENT}\"}}" || true
 
