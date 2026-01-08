@@ -3,7 +3,7 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
-import { RotateCcw, Move } from 'lucide-react'
+import { RotateCcw, Move, ExternalLink } from 'lucide-react'
 import type { TextContent, ChartContent, TableContent } from './ChatArea'
 
 interface MessageContentProps {
@@ -23,6 +23,17 @@ export function MessageContent({ content }: MessageContentProps) {
             li: ({ children }) => <li className="text-gray-300">{children}</li>,
             code: ({ children }) => (
               <code className="px-1.5 py-0.5 bg-dark-600 rounded text-sm text-violet-300">{children}</code>
+            ),
+            a: ({ href, children }) => (
+              <a
+                href={href}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-0.5 text-violet-400 hover:text-violet-300 hover:underline transition-colors"
+              >
+                {children}
+                <ExternalLink className="w-3 h-3 flex-shrink-0" />
+              </a>
             ),
           }}
         >

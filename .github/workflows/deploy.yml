@@ -44,6 +44,8 @@ jobs:
           DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
           HOST=0.0.0.0
           PORT=8000
+          QDRANT_HOST=qdrant
+          QDRANT_PORT=6333
           EOF
           
           echo "📝 NEXT_PUBLIC_API_URL=http://${{ steps.ip.outputs.SERVER_IP }}:18000"

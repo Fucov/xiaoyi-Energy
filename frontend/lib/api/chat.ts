@@ -1,22 +1,8 @@
-import type { Message, Step, TextContent, ChartContent, TableContent } from '@/components/chat/ChatArea'
+import type { Step, TextContent, ChartContent, TableContent } from '@/components/chat/ChatArea'
 import { PREDICTION_STEPS } from '@/components/chat/ChatArea'
 
 // API 基础URL（假设FastAPI后端运行在本地）
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
-
-// Tool 开关设置接口
-export interface ToolSettings {
-  forecast: boolean      // 序列预测（默认 true）
-  reportRag: boolean     // 研报检索（默认 false）
-  newsRag: boolean       // 新闻 RAG（默认 false）
-}
-
-// 默认 Tool 设置
-export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
-  forecast: true,
-  reportRag: false,
-  newsRag: false
-}
 
 // 获取快速追问建议
 export async function getSuggestions(sessionId?: string | null): Promise<string[]> {
@@ -287,19 +273,10 @@ async function generateResponseContent(message: string): Promise<(TextContent | 
 // 实际API调用函数（当后端准备好时使用）
 export async function* sendMessageStreamReal(
   message: string,
-  model: string = 'prophet',
   sessionId?: string | null,
   history?: Array<{ role: string; content: string }>,
-  onStepUpdate?: (steps: Step[]) => void,
-  tools?: ToolSettings
+  onStepUpdate?: (steps: Step[]) => void
 ): AsyncGenerator<{ type: 'step' | 'content' | 'session' | 'text_delta' | 'text_done' | 'intent'; data: any }, void, unknown> {
-  // 转换前端 camelCase 到后端 snake_case
-  const toolsPayload = tools ? {
-    forecast: tools.forecast,
-    report_rag: tools.reportRag,
-    news_rag: tools.newsRag
-  } : undefined
-
   const response = await fetch(`${API_BASE_URL}/api/chat/stream`, {
     method: 'POST',
     headers: {
@@ -307,10 +284,8 @@ export async function* sendMessageStreamReal(
     },
     body: JSON.stringify({
       message,
-      model,
       session_id: sessionId || null,
-      history: history || null,
-      tools: toolsPayload
+      history: history || null
     }),
   })
 

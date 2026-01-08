@@ -189,3 +189,128 @@ class SentimentAnalyzer:
             "changepoint_range": 0.8,
             "reasoning": "使用默认参数"
         }
+
+    def analyze_with_links(
+        self,
+        akshare_news_df: pd.DataFrame,
+        tavily_results: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """
+        分析新闻情绪，生成带链接的格式化文本
+
+        Args:
+            akshare_news_df: AkShare 新闻 DataFrame（无 URL）
+            tavily_results: Tavily 搜索结果（有 URL）
+
+        Returns:
+            包含 sentiment、overall_score、formatted_text 的字典
+        """
+        # 1. 构建综合新闻上下文
+        combined_context = self._build_combined_context(akshare_news_df, tavily_results)
+
+        if not combined_context:
+            return self._default_sentiment_with_text()
+
+        # 2. 使用 LLM 分析并生成带链接的摘要
+        system_prompt = """你是金融情绪分析专家。分析以下新闻，返回情绪判断和格式化摘要。
+
+返回 JSON 格式:
+{
+    "overall_score": float,  // -1(极负面) 到 1(极正面)
+    "sentiment": str,        // 正面/偏正面/中性/偏负面/负面
+    "confidence": float,     // 0-1 置信度
+    "formatted_text": str    // 完整的 markdown 格式文本，见下方格式要求
+}
+
+formatted_text 格式要求:
+1. 开头写整体情绪判断和得分
+2. 列出 3-5 条关键新闻，每条一行
+3. **重要**：如果新闻有 URL，必须使用 markdown 链接 [标题](url)
+4. 结尾写简短分析说明
+
+示例 formatted_text:
+**市场情绪分析**
+
+- 整体情绪: 偏正面
+- 情绪得分: 0.35 (范围: -1 到 1)
+- 分析新闻数: 15
+
+**关键事件:**
+
+1. [贵州茅台发布年报，营收创新高](https://finance.sina.com.cn/xxx) - 业绩表现超预期
+2. [茅台酒批价稳中有升](https://eastmoney.com/xxx) - 市场需求旺盛
+3. 茅台集团召开工作会议，强调高质量发展 - 公司战略清晰
+4. [券商上调茅台目标价](https://qq.com/xxx) - 市场看好后市
+
+**分析说明:** 近期茅台业绩亮眼，市场情绪偏正面，关注后续渠道政策变化。
+
+只返回 JSON"""
+
+        user_prompt = f"新闻内容:\n{combined_context}"
+
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
+
+            result = json.loads(response.choices[0].message.content)
+            akshare_count = len(akshare_news_df) if akshare_news_df is not None and not akshare_news_df.empty else 0
+            result["news_count"] = akshare_count + tavily_results.get("count", 0)
+            return result
+
+        except Exception as e:
+            print(f"情绪分析（带链接）失败: {e}")
+            return self._default_sentiment_with_text()
+
+    def _build_combined_context(
+        self,
+        akshare_df: pd.DataFrame,
+        tavily_results: Dict[str, Any]
+    ) -> str:
+        """构建综合新闻上下文"""
+        context_parts = []
+
+        # 1. AkShare 新闻（无 URL）
+        if akshare_df is not None and not akshare_df.empty:
+            context_parts.append("=== 即时新闻（AkShare）===")
+            title_col = next((c for c in ["新闻标题", "标题", "title"] if c in akshare_df.columns), None)
+            content_col = next((c for c in ["新闻内容", "内容", "content"] if c in akshare_df.columns), None)
+
+            for _, row in akshare_df.head(20).iterrows():
+                title = row.get(title_col, "") if title_col else ""
+                content = str(row.get(content_col, ""))[:100] if content_col else ""
+                if title:
+                    context_parts.append(f"- {title}: {content}")
+
+        # 2. Tavily 新闻（有 URL）
+        if tavily_results.get("results"):
+            context_parts.append("\n=== 网络新闻（Tavily，带URL）===")
+            for item in tavily_results["results"]:
+                title = item.get("title", "")
+                url = item.get("url", "")
+                content = item.get("content", "")[:100]
+                context_parts.append(f"- 【{title}】({url}): {content}")
+
+        return "\n".join(context_parts)
+
+    def _default_sentiment_with_text(self) -> Dict[str, Any]:
+        """返回默认情绪结果（带格式化文本）"""
+        return {
+            "overall_score": 0.0,
+            "sentiment": "中性",
+            "confidence": 0.5,
+            "news_count": 0,
+            "formatted_text": """**市场情绪分析**
+
+- 整体情绪: 中性
+- 情绪得分: 0.00 (范围: -1 到 1)
+- 分析新闻数: 0
+
+**分析说明:** 未获取到相关新闻，默认中性情绪。"""
+        }

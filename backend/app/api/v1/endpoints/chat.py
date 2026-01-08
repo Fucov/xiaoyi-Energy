@@ -1,4 +1,5 @@
 import asyncio
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 from fastapi import APIRouter
 from fastapi.responses import StreamingResponse
@@ -6,7 +7,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.utils import format_sse, df_to_table, df_to_chart, detect_anomalies, forecast_to_chart, STEPS
 from app.core.session_manager import get_session_manager
-from app.agents import FinanceChatAgent, IntentAgent, SuggestionAgent
+from app.agents import FinanceChatAgent, IntentAgent, SuggestionAgent, RAGAgent
 from app.data import DataFetcher
 from app.models import (
     TimeSeriesAnalyzer,
@@ -20,20 +21,11 @@ from app.sentiment import SentimentAnalyzer
 router = APIRouter()
 
 
-class ToolSettings(BaseModel):
-    """Tool 开关设置"""
-    forecast: bool = True       # 序列预测（默认开启）
-    report_rag: bool = False    # 研报检索（默认关闭）
-    news_rag: bool = False      # 新闻 RAG（默认关闭）
-
-
 class ChatRequest(BaseModel):
     """聊天请求模型"""
     message: str
-    model: str = "prophet"  # 预测模型：prophet, xgboost, randomforest, dlinear
     session_id: Optional[str] = None  # 会话ID，可选
     history: Optional[List[Dict[str, str]]] = None  # 对话历史，可选（用于兼容）
-    tools: ToolSettings = ToolSettings()  # Tool 开关设置
 
 
 class SuggestionsRequest(BaseModel):
@@ -56,12 +48,6 @@ async def chat_stream(request: ChatRequest):
             agent = FinanceChatAgent(api_key)
             sentiment_analyzer = SentimentAnalyzer(api_key)
             user_input = request.message
-            model = request.model.lower() if request.model else "prophet"
-
-            # 验证模型名称
-            if model not in ["prophet", "xgboost", "randomforest", "dlinear"]:
-                yield format_sse("error", {"message": f"不支持的模型: {model}。支持: 'prophet', 'xgboost', 'randomforest', 'dlinear'"})
-                return
 
             # 会话管理
             session_manager = get_session_manager()
@@ -79,23 +65,170 @@ async def chat_stream(request: ChatRequest):
             # 添加用户消息到历史（在处理前添加，以便后续更新）
             session_manager.add_message(session_id, "user", user_input)
 
-            # 获取 Tools 设置
-            tools = request.tools
-
             # ========== 意图判断 ==========
             intent_agent = IntentAgent(api_key)
             intent_result = await asyncio.to_thread(intent_agent.judge_intent, user_input, conversation_history)
             intent = intent_result.get("intent", "analyze")
             intent_reason = intent_result.get("reason", "")
 
-            # 发送意图识别结果给前端
+            # 从意图识别结果获取 tools、model 和 params
+            intent_tools = intent_result.get("tools", {"forecast": True, "report_rag": False, "news_rag": False})
+            model = intent_result.get("model", "prophet")
+            intent_params = intent_result.get("params", {"history_days": 365, "forecast_horizon": 30})
+            history_days = intent_params.get("history_days", 365)
+            forecast_horizon = intent_params.get("forecast_horizon", 30)
+
+            # 发送意图识别结果给前端（包含 tools、model 和 params）
             yield format_sse("intent", {
                 "intent": intent,
-                "reason": intent_reason
+                "reason": intent_reason,
+                "tools": intent_tools,
+                "model": model,
+                "params": intent_params
             })
 
+            # ========== RAG 研报检索分支 ==========
+            if intent_tools.get("report_rag", False):
+                print(f"[RAG] 意图识别: report_rag=True")
+                print(f"[RAG] 用户查询: {user_input}")
+
+                # 使用 RAG Agent 检索研报并生成回答
+                rag_agent = RAGAgent(api_key)
+                full_answer = ""
+
+                # 发送检索开始状态
+                yield format_sse("step", {"steps": [
+                    {"id": "rag_search", "name": "研报检索", "status": "running", "message": "正在检索相关研报..."}
+                ]})
+
+                # 检索相关文档
+                print(f"[RAG] 开始检索...")
+                retrieved_docs = await asyncio.to_thread(rag_agent.search_reports, user_input, 5)
+                print(f"[RAG] 找到 {len(retrieved_docs)} 条相关内容")
+
+                # 发送检索结果（来源信息）
+                if retrieved_docs:
+                    sources = []
+                    source_summary = []
+                    for doc in retrieved_docs:
+                        sources.append({
+                            "file_name": doc["file_name"],
+                            "page_number": doc["page_number"],
+                            "score": round(doc["score"], 3)
+                        })
+                        source_summary.append(f"{doc['file_name']}:{doc['page_number']}")
+                    print(f"[RAG] 来源: {', '.join(source_summary)}")
+                    yield format_sse("rag_sources", {"sources": sources, "count": len(retrieved_docs)})
+
+                    yield format_sse("step", {"steps": [
+                        {"id": "rag_search", "name": "研报检索", "status": "completed", "message": f"找到 {len(retrieved_docs)} 条相关内容"}
+                    ]})
+                else:
+                    print(f"[RAG] 未找到相关研报")
+                    yield format_sse("step", {"steps": [
+                        {"id": "rag_search", "name": "研报检索", "status": "completed", "message": "未找到相关研报"}
+                    ]})
+
+                # 流式生成回答
+                print(f"[RAG] 生成回答中...")
+                yield format_sse("step", {"steps": [
+                    {"id": "rag_search", "name": "研报检索", "status": "completed", "message": f"找到 {len(retrieved_docs)} 条相关内容"},
+                    {"id": "rag_generate", "name": "生成回答", "status": "running", "message": "基于研报内容生成回答..."}
+                ]})
+
+                def stream_rag_answer():
+                    return rag_agent.generate_answer_stream(user_input, retrieved_docs, conversation_history)
+
+                generator = await asyncio.to_thread(stream_rag_answer)
+
+                for chunk in generator:
+                    full_answer += chunk
+                    yield format_sse("text_delta", {"delta": chunk})
+
+                yield format_sse("text_done", {"text": full_answer})
+                print(f"[RAG] 回答生成完成, 长度: {len(full_answer)} 字符")
+
+                yield format_sse("step", {"steps": [
+                    {"id": "rag_search", "name": "研报检索", "status": "completed", "message": f"找到 {len(retrieved_docs)} 条相关内容"},
+                    {"id": "rag_generate", "name": "生成回答", "status": "completed", "message": "回答生成完成"}
+                ]})
+
+                # 添加助手回复到会话历史
+                session_manager.add_message(session_id, "assistant", full_answer)
+                return
+
+            # ========== 新闻搜索分支（仅当 forecast=False 时执行纯新闻搜索） ==========
+            if intent_tools.get("news_rag", False) and not intent_tools.get("forecast", False):
+                print(f"[News] 意图识别: news_rag=True, forecast=False")
+                print(f"[News] 用户查询: {user_input}")
+
+                from app.news import TavilyNewsClient
+
+                # 发送搜索开始状态
+                yield format_sse("step", {"steps": [
+                    {"id": "news_search", "name": "新闻搜索", "status": "running", "message": "正在搜索相关新闻..."}
+                ]})
+
+                # 搜索新闻
+                try:
+                    tavily_client = TavilyNewsClient(settings.tavily_api_key)
+
+                    # 搜索新闻
+                    search_results = await asyncio.to_thread(
+                        tavily_client.search,
+                        query=user_input,
+                        days=30,
+                        max_results=10
+                    )
+
+                    print(f"[News] 找到 {search_results['count']} 条新闻")
+
+                    yield format_sse("step", {"steps": [
+                        {"id": "news_search", "name": "新闻搜索", "status": "completed", "message": f"找到 {search_results['count']} 条相关新闻"}
+                    ]})
+
+                    # 使用 LLM 总结新闻（LLM会在文本中嵌入markdown链接）
+                    yield format_sse("step", {"steps": [
+                        {"id": "news_search", "name": "新闻搜索", "status": "completed", "message": f"找到 {search_results['count']} 条新闻"},
+                        {"id": "news_summary", "name": "新闻总结", "status": "running", "message": "生成新闻摘要..."}
+                    ]})
+
+                    # 构建 LLM 上下文
+                    news_context = tavily_client.format_results_for_llm(search_results)
+
+                    # 流式生成总结
+                    full_answer = ""
+
+                    def stream_news_summary():
+                        return intent_agent.summarize_news_stream(user_input, news_context, conversation_history)
+
+                    generator = await asyncio.to_thread(stream_news_summary)
+
+                    for chunk in generator:
+                        full_answer += chunk
+                        yield format_sse("text_delta", {"delta": chunk})
+
+                    yield format_sse("text_done", {"text": full_answer})
+
+                    yield format_sse("step", {"steps": [
+                        {"id": "news_search", "name": "新闻搜索", "status": "completed", "message": f"找到 {search_results['count']} 条新闻"},
+                        {"id": "news_summary", "name": "新闻总结", "status": "completed", "message": "总结完成"}
+                    ]})
+
+                    session_manager.add_message(session_id, "assistant", full_answer)
+
+                except ValueError as e:
+                    # API Key 未配置
+                    yield format_sse("content", {"content": {"type": "text", "text": f"新闻搜索服务未配置: {str(e)}"}})
+                except Exception as e:
+                    yield format_sse("content", {"content": {"type": "text", "text": f"新闻搜索失败: {str(e)}"}})
+                    import traceback
+                    print(f"[News] Error: {traceback.format_exc()}")
+
+                return
+
             # 如果 forecast tool 关闭，或者只是提问，直接回答
-            if not tools.forecast or intent == "answer":
+            if not intent_tools.get("forecast", True) or intent == "answer":
                 # 流式回答问题，不执行完整分析
                 full_answer = ""
 
@@ -133,19 +266,16 @@ async def chat_stream(request: ChatRequest):
             data_config = parsed["data_config"]
             analysis_config = parsed["analysis_config"]
 
-            # 检查用户问题中是否指定了模型（如"换个XGBoost模型"）
-            user_input_lower = user_input.lower()
-            if "xgboost" in user_input_lower or "xgb" in user_input_lower:
-                model = "xgboost"
-            elif "randomforest" in user_input_lower or "随机森林" in user_input or "rf" in user_input_lower:
-                model = "randomforest"
-            elif "dlinear" in user_input_lower or "d-linear" in user_input_lower:
-                model = "dlinear"
-            elif "prophet" in user_input_lower:
-                model = "prophet"
-            # 否则使用前端传递的 model 参数
+            # 使用意图识别的历史窗口参数计算 start_date
+            end_date = datetime.now().strftime("%Y%m%d")
+            start_date = (datetime.now() - timedelta(days=history_days)).strftime("%Y%m%d")
 
-            steps[0]["message"] = "获取数据中..."
+            if "params" not in data_config:
+                data_config["params"] = {}
+            data_config["params"]["start_date"] = start_date
+            data_config["params"]["end_date"] = end_date
+
+            steps[0]["message"] = f"获取 {history_days} 天历史数据..."
             yield format_sse("step", {"steps": steps})
             await asyncio.sleep(0.1)
 
@@ -174,21 +304,55 @@ async def chat_stream(request: ChatRequest):
             yield format_sse("step", {"steps": steps})
             await asyncio.sleep(0.1)
 
-            # 获取股票代码
+            # 获取股票代码和名称
             stock_symbol = data_config.get("params", {}).get("symbol", "")
+            stock_name = parsed.get("analysis_config", {}).get("stock_name", user_input)
 
-            # 获取新闻
+            # 检查是否需要 Tavily 增强（news_rag=True 时启用）
+            use_tavily = intent_tools.get("news_rag", False)
+
+            # AkShare 新闻获取（始终执行）
             news_df = await asyncio.to_thread(DataFetcher.fetch_news, stock_symbol, 50)
+            tavily_results = {"results": [], "count": 0}
 
-            steps[1]["message"] = f"分析 {len(news_df)} 条新闻情绪..."
+            # 如果启用 Tavily，获取网络新闻
+            if use_tavily:
+                from app.news import TavilyNewsClient
+                try:
+                    tavily_client = TavilyNewsClient(settings.tavily_api_key)
+                    tavily_results = await asyncio.to_thread(
+                        tavily_client.search_stock_news,
+                        stock_name=stock_name,
+                        days=30,
+                        max_results=10
+                    )
+                    print(f"[Tavily] 增强搜索: 找到 {tavily_results['count']} 条新闻")
+                except Exception as e:
+                    print(f"[Tavily] 搜索失败（降级为仅 AkShare）: {e}")
+
+            akshare_count = len(news_df) if news_df is not None and not news_df.empty else 0
+            tavily_count = tavily_results.get("count", 0)
+            total_count = akshare_count + tavily_count
+
+            steps[1]["message"] = f"分析 {total_count} 条新闻情绪..."
             yield format_sse("step", {"steps": steps})
             await asyncio.sleep(0.1)
 
-            # 情绪分析
-            sentiment_result = await asyncio.to_thread(sentiment_analyzer.analyze, news_df)
-
-            # 发送情绪分析结果
-            sentiment_text = f"""**市场情绪分析**
+            # 根据是否有 Tavily 结果选择分析方法
+            if use_tavily and tavily_count > 0:
+                # 使用增强版分析（带链接）
+                sentiment_result = await asyncio.to_thread(
+                    sentiment_analyzer.analyze_with_links,
+                    news_df,
+                    tavily_results
+                )
+                # 发送带链接的情绪分析结果
+                yield format_sse("content", {"content": {"type": "text", "text": sentiment_result["formatted_text"]}})
+            else:
+                # 使用原有分析方法（无链接）
+                sentiment_result = await asyncio.to_thread(sentiment_analyzer.analyze, news_df)
+                # 发送原有格式的情绪分析结果
+                sentiment_text = f"""**市场情绪分析**
 
 - 整体情绪: {sentiment_result.get('sentiment', '中性')}
 - 情绪得分: {sentiment_result.get('overall_score', 0):.2f} (范围: -1 到 1)
@@ -196,14 +360,13 @@ async def chat_stream(request: ChatRequest):
 
 **关键事件:**
 """
-            key_events = sentiment_result.get('key_events', [])
-            for i, event in enumerate(key_events[:5], 1):
-                sentiment_text += f"\n{i}. {event}"
+                key_events = sentiment_result.get('key_events', [])
+                for i, event in enumerate(key_events[:5], 1):
+                    sentiment_text += f"\n{i}. {event}"
+                if sentiment_result.get('analysis_text'):
+                    sentiment_text += f"\n\n**分析说明:** {sentiment_result.get('analysis_text')}"
+                yield format_sse("content", {"content": {"type": "text", "text": sentiment_text}})
 
-            if sentiment_result.get('analysis_text'):
-                sentiment_text += f"\n\n**分析说明:** {sentiment_result.get('analysis_text')}"
-
-            yield format_sse("content", {"content": {"type": "text", "text": sentiment_text}})
             await asyncio.sleep(0.1)
 
             steps[1]["status"] = "completed"
@@ -256,11 +419,12 @@ async def chat_stream(request: ChatRequest):
 
             # ========== 步骤5: 模型训练与预测 ==========
             steps[4]["status"] = "running"
-            steps[4]["message"] = "训练模型中..."
+            steps[4]["message"] = f"训练 {model.upper()} 模型，预测 {forecast_horizon} 天..."
             yield format_sse("step", {"steps": steps})
             await asyncio.sleep(0.1)
 
-            horizon = analysis_config.get("forecast_horizon", 30)
+            # 使用意图识别的预测窗口参数
+            horizon = forecast_horizon
 
             # 根据选择的模型进行预测
             if model == "prophet":

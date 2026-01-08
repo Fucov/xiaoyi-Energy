@@ -2,13 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
-import { Download, Share2, MoreVertical, Paperclip, Send, Zap, Settings2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Download, Share2, MoreVertical, Send } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { QuickSuggestions } from './QuickSuggestions'
 import { AnalysisCards } from './AnalysisCards'
 import { cn } from '@/lib/utils'
-import type { ToolSettings } from '@/lib/api/chat'
-import { DEFAULT_TOOL_SETTINGS } from '@/lib/api/chat'
 
 // 步骤状态
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -132,11 +130,8 @@ export function ChatArea() {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<'prophet' | 'xgboost' | 'randomforest' | 'dlinear'>('prophet')
   const [sessionId, setSessionId] = useState<string>(() => getOrCreateSessionId())
   const [quickSuggestions, setQuickSuggestions] = useState<string[]>(defaultQuickSuggestions)
-  const [tools, setTools] = useState<ToolSettings>(DEFAULT_TOOL_SETTINGS)
-  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false)
 
   // 对话区域滚动容器 ref
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -240,7 +235,6 @@ export function ChatArea() {
 
       for await (const chunk of sendMessageStreamReal(
         messageToSend,
-        selectedModel,
         currentSessionId,
         history,
         (steps: Step[]) => {
@@ -250,8 +244,7 @@ export function ChatArea() {
               ? { ...msg, steps }
               : msg
           ))
-        },
-        tools  // 传递 tools 设置
+        }
       )) {
         if (chunk.type === 'session') {
           // 接收后端返回的 session_id（新会话）
@@ -440,20 +433,6 @@ export function ChatArea() {
         <div className="max-w-4xl mx-auto">
           {/* 输入框行 */}
           <div className="flex items-center gap-2">
-            {/* 设置折叠按钮 */}
-            <button
-              onClick={() => setIsSettingsExpanded(!isSettingsExpanded)}
-              className={cn(
-                "p-2 rounded-lg transition-all flex-shrink-0",
-                isSettingsExpanded
-                  ? "bg-violet-500/20 text-violet-400"
-                  : "hover:bg-dark-600 text-gray-500"
-              )}
-              title="设置"
-            >
-              <Settings2 className="w-4 h-4" />
-            </button>
-
             {/* 输入框 */}
             <div className="flex-1 relative">
               <div className="glass rounded-xl border border-white/10 focus-within:border-violet-500/50 transition-colors">
@@ -478,78 +457,6 @@ export function ChatArea() {
             </button>
           </div>
 
-          {/* 可折叠设置面板 */}
-          {isSettingsExpanded && (
-            <div className="mt-2 p-3 bg-dark-700/30 rounded-lg border border-white/5 space-y-3">
-              {/* 功能开关 */}
-              <div className="flex items-center gap-4">
-                <span className="text-[11px] text-gray-500 w-16">启用功能</span>
-                <div className="flex items-center gap-3">
-                  {/* 序列预测 */}
-                  <button
-                    onClick={() => setTools({...tools, forecast: !tools.forecast})}
-                    className={cn(
-                      "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border",
-                      tools.forecast
-                        ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
-                        : "bg-dark-600/50 text-gray-500 border-white/5 hover:border-white/10"
-                    )}
-                  >
-                    序列预测
-                  </button>
-                  {/* 研报检索 */}
-                  <button
-                    disabled
-                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-dark-600/30 text-gray-600 border border-white/5 cursor-not-allowed"
-                    title="即将推出"
-                  >
-                    研报检索
-                  </button>
-                  {/* 新闻分析 */}
-                  <button
-                    disabled
-                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-dark-600/30 text-gray-600 border border-white/5 cursor-not-allowed"
-                    title="即将推出"
-                  >
-                    新闻分析
-                  </button>
-                </div>
-              </div>
-
-              {/* 模型选择 - 仅在序列预测开启时显示 */}
-              {tools.forecast && (
-                <div className="flex items-center gap-4">
-                  <span className="text-[11px] text-gray-500 w-16">预测模型</span>
-                  <div className="flex items-center gap-1.5">
-                    {(['prophet', 'xgboost', 'randomforest', 'dlinear'] as const).map((model) => (
-                      <button
-                        key={model}
-                        onClick={() => setSelectedModel(model)}
-                        className={cn(
-                          "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border",
-                          selectedModel === model
-                            ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
-                            : "bg-dark-600/50 text-gray-400 border-white/5 hover:border-white/10 hover:text-gray-300"
-                        )}
-                      >
-                        {model === 'prophet' && 'Prophet'}
-                        {model === 'xgboost' && 'XGBoost'}
-                        {model === 'randomforest' && 'RandomForest'}
-                        {model === 'dlinear' && 'DLinear'}
-                      </button>
-                    ))}
-                  </div>
-                  <span className="text-[10px] text-gray-600 ml-auto">
-                    {selectedModel === 'prophet' && '适合长期预测'}
-                    {selectedModel === 'xgboost' && '捕捉非线性关系'}
-                    {selectedModel === 'randomforest' && '稳定性好'}
-                    {selectedModel === 'dlinear' && '轻量高效'}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* 底部提示 */}
           <div className="flex items-center justify-between mt-1.5 px-1">
             <div className="flex items-center gap-2 text-[10px] text-gray-600">
@@ -557,7 +464,7 @@ export function ChatArea() {
               <span>发送</span>
             </div>
             <div className="text-[10px] text-gray-600">
-              {tools.forecast ? `${selectedModel.toUpperCase()} · 序列预测` : '直接对话'}
+              智能识别意图 · 自动选择模型
             </div>
           </div>
         </div>

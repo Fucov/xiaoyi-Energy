@@ -10,9 +10,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 # 配置 apt 使用阿里云镜像
 RUN sed -i 's/deb.debian.org/mirrors.aliyun.com/g' /etc/apt/sources.list.d/debian.sources
 
-# 安装系统依赖（Prophet 编译需要）
+# 安装系统依赖（Prophet 编译、zlib-state 编译需要）
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
+    zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -27,6 +28,7 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 # 复制业务代码
 COPY backend/app ./app
+COPY backend/scripts ./scripts
 
 EXPOSE 8000
 

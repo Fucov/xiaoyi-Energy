@@ -45,5 +45,11 @@ coverage/
 /REFACTORING_SUMMARY.md
 
 # Data files
+*.pdf
+*.zip
 energy_reports/
-energy.zip
+energy_reports_test/
+
+# Model cache
+.cache/
+huggingface/

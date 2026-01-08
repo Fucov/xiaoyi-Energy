@@ -10,5 +10,6 @@ from .report_agent import ReportAgent
 from .finance_agent import FinanceChatAgent
 from .intent_agent import IntentAgent
 from .suggestion_agent import SuggestionAgent
+from .rag_agent import RAGAgent
 
-__all__ = ["NLPAgent", "ReportAgent", "FinanceChatAgent", "IntentAgent", "SuggestionAgent"]
+__all__ = ["NLPAgent", "ReportAgent", "FinanceChatAgent", "IntentAgent", "SuggestionAgent", "RAGAgent"]

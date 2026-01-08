@@ -73,7 +73,8 @@ class NLPAgent:
     "analysis_config": {{
         "forecast_horizon": 30,
         "model": "prophet",
-        "user_question": "用户问题的核心"
+        "user_question": "用户问题的核心",
+        "stock_name": "股票中文名称"
     }}
 }}
 
@@ -83,6 +84,7 @@ class NLPAgent:
 - 今天: {today.strftime('%Y-%m-%d')}
 - 一年前: {one_year_ago.strftime('%Y-%m-%d')}
 - model 字段固定返回 "prophet"（实际模型选择由外部参数控制）
+- stock_name 字段填写股票的中文全称（如"贵州茅台"、"比亚迪"、"中国石油"），用于新闻搜索
 - **重要**：如果用户的问题涉及之前的对话（如"这个股票"、"刚才的分析"、"换个模型预测"），请从对话历史中提取：
   - 股票代码（如历史中提到"茅台"，应提取为"600519"）
   - 预测天数（如果历史中有提到，可以沿用或根据当前问题调整）
