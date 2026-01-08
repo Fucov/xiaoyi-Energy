@@ -77,12 +77,16 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 export async function createAnalysisTask(
   message: string,
   model: string = 'prophet',
-  context: string = ''
-): Promise<{ session_id: string; status: string }> {
+  context: string = '',
+  sessionId?: string | null
+): Promise<{ session_id: string; status: string; intent?: string }> {
+  // 如果有 sessionId，将其添加到 context 中
+  const contextWithSession = sessionId ? `session_id:${sessionId}` : context
+  
   const response = await fetch(`${API_BASE_URL}/api/analysis/create`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, model, context })
+    body: JSON.stringify({ message, model, context: contextWithSession })
   })
 
   if (!response.ok) {
