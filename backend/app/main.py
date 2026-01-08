@@ -2,6 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.api import api_router
+from app.api.v2 import api_router as api_router_v2
 
 app = FastAPI(title="小易猜猜 API", version="1.0.0")
 
@@ -16,6 +17,7 @@ app.add_middleware(
 )
 
 app.include_router(api_router, prefix="/api")
+app.include_router(api_router_v2, prefix="/api/v2")
 
 @app.get("/")
 async def root():

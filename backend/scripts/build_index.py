@@ -22,6 +22,13 @@ import time
 # 添加 backend 目录到路径
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# 自动加载 .env 文件
+from dotenv import load_dotenv
+# 先尝试项目根目录的 .env，再尝试 backend 目录的 .env
+root_env = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), '.env')
+backend_env = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), '.env')
+load_dotenv(root_env) or load_dotenv(backend_env)
+
 from app.rag import RAGService
 from app.rag.config import get_rag_config
 

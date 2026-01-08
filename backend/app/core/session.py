@@ -18,8 +18,12 @@ from app.schemas.session_schema import (
     TimeSeriesPoint,
     NewsItem,
     ReportItem,
-    EmotionAnalysis
+    EmotionAnalysis,
+    StepDetail,
+    RAGSource,
+    IntentResult
 )
+from app.core.step_definitions import get_steps_for_intent, get_step_count
 
 
 class Session:
@@ -166,3 +170,120 @@ class Session:
         """检查会话是否存在"""
         redis = get_redis()
         return redis.exists(f"session:{session_id}") > 0
+
+    # ========== v2 新增方法 ==========
+
+    def save_intent_result(self, intent: str, intent_result: dict):
+        """
+        保存意图识别结果并初始化步骤
+
+        Args:
+            intent: 意图类型 (forecast/rag/news/chat)
+            intent_result: 意图识别结果字典
+        """
+        data = self.get()
+        if data:
+            data.intent = intent
+            data.intent_result = IntentResult(
+                intent=intent_result.get("intent", "analyze"),
+                reason=intent_result.get("reason", ""),
+                tools=intent_result.get("tools", {"forecast": True, "report_rag": False, "news_rag": False}),
+                model=intent_result.get("model", "prophet"),
+                params=intent_result.get("params", {"history_days": 365, "forecast_horizon": 30})
+            )
+
+            # 初始化步骤详情
+            steps = get_steps_for_intent(intent)
+            data.total_steps = len(steps)
+            data.step_details = [
+                StepDetail(id=s["id"], name=s["name"], status="pending", message="")
+                for s in steps
+            ]
+
+            self._save(data)
+            print(f"🎯 Intent saved: {intent}, total_steps={data.total_steps}")
+
+    def update_step_detail(self, step: int, status: str, message: str = ""):
+        """
+        更新步骤详情
+
+        Args:
+            step: 步骤编号 (1-based)
+            status: 状态 (pending/running/completed/error)
+            message: 状态消息
+        """
+        data = self.get()
+        if data and 0 < step <= len(data.step_details):
+            data.steps = step  # 兼容旧字段
+            data.status = SessionStatus.PROCESSING
+            data.step_details[step - 1].status = status
+            data.step_details[step - 1].message = message
+            self._save(data)
+            print(f"📊 Step {step}/{data.total_steps} [{status}]: {message}")
+
+    def save_rag_sources(self, sources: List[RAGSource]):
+        """保存 RAG 来源"""
+        data = self.get()
+        if data:
+            data.rag_sources = sources
+            self._save(data)
+            print(f"📚 Saved {len(sources)} RAG sources")
+
+    def get_conversation_history(self) -> List[dict]:
+        """获取对话历史"""
+        data = self.get()
+        return data.conversation_history if data else []
+
+    def add_conversation_message(self, role: str, content: str):
+        """
+        添加对话消息
+
+        Args:
+            role: 角色 (user/assistant)
+            content: 消息内容
+        """
+        data = self.get()
+        if data:
+            data.conversation_history.append({"role": role, "content": content})
+            # 保留最近10轮对话
+            if len(data.conversation_history) > 20:
+                data.conversation_history = data.conversation_history[-20:]
+            self._save(data)
+            print(f"💬 Added {role} message to history")
+
+    def reset_for_new_query(self):
+        """重置会话状态（用于多轮对话的新查询）"""
+        data = self.get()
+        if data:
+            # 保留会话历史，重置其他状态
+            data.status = SessionStatus.PENDING
+            data.steps = 0
+            data.intent = "pending"
+            data.intent_result = None
+            data.total_steps = 0
+            data.step_details = []
+            data.time_series_original = []
+            data.time_series_full = []
+            data.prediction_done = False
+            data.prediction_start_day = None
+            data.news_list = []
+            data.rag_sources = []
+            data.emotion = None
+            data.emotion_des = None
+            data.conclusion = ""
+            data.error_message = None
+            self._save(data)
+            print(f"🔄 Session reset for new query")
+
+    def mark_completed_v2(self):
+        """标记为完成（v2 版本，使用动态步骤数）"""
+        data = self.get()
+        if data:
+            data.status = SessionStatus.COMPLETED
+            data.steps = data.total_steps  # 使用动态步骤数
+            # 将所有步骤标记为完成
+            for step in data.step_details:
+                if step.status != "error":
+                    step.status = "completed"
+            self._save(data)
+            print(f"✅✅✅ Session {self.session_id} COMPLETED ({data.total_steps} steps) ✅✅✅")

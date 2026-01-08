@@ -7,7 +7,7 @@ from pydantic import BaseModel
 from app.core.config import settings
 from app.core.utils import format_sse, df_to_table, df_to_chart, detect_anomalies, forecast_to_chart, STEPS
 from app.core.session_manager import get_session_manager
-from app.agents import FinanceChatAgent, IntentAgent, SuggestionAgent, RAGAgent
+from app.agents import FinanceChatAgent, IntentAgent, SuggestionAgent, RAGAgent, RAG_AVAILABLE
 from app.data import DataFetcher
 from app.models import (
     TimeSeriesAnalyzer,
@@ -88,7 +88,7 @@ async def chat_stream(request: ChatRequest):
             })
 
             # ========== RAG 研报检索分支 ==========
-            if intent_tools.get("report_rag", False):
+            if intent_tools.get("report_rag", False) and RAG_AVAILABLE:
                 print(f"[RAG] 意图识别: report_rag=True")
                 print(f"[RAG] 用户查询: {user_input}")
 
@@ -156,6 +156,11 @@ async def chat_stream(request: ChatRequest):
                 # 添加助手回复到会话历史
                 session_manager.add_message(session_id, "assistant", full_answer)
                 return
+
+            # RAG 被请求但不可用时，提示用户
+            if intent_tools.get("report_rag", False) and not RAG_AVAILABLE:
+                print(f"[RAG] 研报检索功能未启用，跳过 RAG 分支")
+                yield format_sse("content", {"content": {"type": "text", "text": "研报检索功能暂未启用，将使用其他方式回答您的问题。"}})
 
             # ========== 新闻搜索分支（仅当 forecast=False 时执行纯新闻搜索） ==========
             if intent_tools.get("news_rag", False) and not intent_tools.get("forecast", False):

@@ -8,6 +8,7 @@ Embedding 服务模块
 from typing import List, Dict, Tuple, Optional
 from FlagEmbedding import BGEM3FlagModel
 import numpy as np
+import platform
 import time
 
 
@@ -24,10 +25,12 @@ class EmbeddingService:
 
     def __init__(self, model_name: str = "BAAI/bge-m3"):
         if EmbeddingService._model is None:
-            print(f"Loading BGE-M3 model: {model_name}")
+            # FP16 requires CUDA - disable on macOS
+            use_fp16 = platform.system() != "Darwin"
+            print(f"Loading BGE-M3 model: {model_name} (fp16={use_fp16})")
             EmbeddingService._model = BGEM3FlagModel(
                 model_name,
-                use_fp16=True
+                use_fp16=use_fp16
             )
             print("BGE-M3 model loaded successfully")
 
