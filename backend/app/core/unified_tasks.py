@@ -14,7 +14,7 @@ import asyncio
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
-from app.core.session import Session, SessionManager
+from app.core.session import Session
 from app.core.config import settings
 from app.schemas.session_schema import (
     SessionStatus,

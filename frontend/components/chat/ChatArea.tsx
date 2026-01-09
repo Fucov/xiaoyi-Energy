@@ -2,11 +2,13 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
-import { Download, Share2, MoreVertical, Send } from 'lucide-react'
+import { Download, Share2, MoreVertical, Paperclip, Send, Zap, Settings2, ChevronDown, ChevronRight } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { QuickSuggestions } from './QuickSuggestions'
 import { AnalysisCards } from './AnalysisCards'
 import { cn } from '@/lib/utils'
+import type { ToolSettings } from '@/lib/api/chat'
+import { DEFAULT_TOOL_SETTINGS } from '@/lib/api/chat'
 
 // 步骤状态
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -90,6 +92,9 @@ export interface Message {
       anomalies: { date: string; change: number }[]
     }
   }
+  // 对话模式标志
+  isConversationalMode?: boolean
+  isCollapsing?: boolean
 }
 
 // 预测步骤定义（7个步骤）- 与后端 STEPS 保持一致
@@ -114,33 +119,31 @@ const defaultQuickSuggestions = [
 // 从 localStorage 获取或生成 session_id
 function getOrCreateSessionId(): string {
   if (typeof window === 'undefined') return ''
-  
+
   const stored = localStorage.getItem('chat_session_id')
   if (stored) {
     return stored
   }
-  
+
   // 生成新的 session_id
   const newSessionId = `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
   localStorage.setItem('chat_session_id', newSessionId)
   return newSessionId
 }
 
-// Tool 开关设置
-interface ToolSettings {
-  forecast: boolean
-  reportRag: boolean
-  newsRag: boolean
-}
-
 export function ChatArea() {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [selectedModel, setSelectedModel] = useState<'prophet' | 'xgboost' | 'randomforest' | 'dlinear'>('prophet')
   const [sessionId, setSessionId] = useState<string>(() => getOrCreateSessionId())
   const [quickSuggestions, setQuickSuggestions] = useState<string[]>(defaultQuickSuggestions)
-  const [selectedModel, setSelectedModel] = useState<'prophet' | 'xgboost' | 'randomforest' | 'dlinear'>('prophet')
-  const [tools, setTools] = useState<ToolSettings>({ forecast: true, reportRag: false, newsRag: false })
+  const [tools, setTools] = useState<ToolSettings>(DEFAULT_TOOL_SETTINGS)
+  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false)
+
+  // 对话模式动画状态 (针对最后一条消息)
+  const [lastMessageConversationalMode, setLastMessageConversationalMode] = useState(false)
+  const [lastMessageCollapsing, setLastMessageCollapsing] = useState(false)
 
   // 对话区域滚动容器 ref
   const chatContainerRef = useRef<HTMLDivElement>(null)
@@ -160,13 +163,68 @@ export function ChatArea() {
     scrollToBottom()
   }, [messages])
 
+  // 检测对话模式并触发坍缩动画
+  useEffect(() => {
+    if (messages.length === 0) return
+
+    const lastMessage = messages[messages.length - 1]
+    if (lastMessage.role !== 'assistant') return
+
+    // 检查最后一条助手消息的内容
+    const lastContent = lastMessage.contents?.[0]
+    const messageText = lastContent?.type === 'text' ? lastContent.text : ''
+
+    // 通过检查消息开头判断是否是对话模式（conversational_response）
+    // 实际应该通过 data 字段，但消息中没有保存原始 data
+    // 所以我们检测：如果只有文本且包含"抱歉"等关键词
+    const looksLikeConversational =
+      lastMessage.contents?.length === 1 &&
+      lastContent?.type === 'text' &&
+      (messageText.includes('抱歉') || messageText.includes('无法获取') || messageText.includes('数据不存在'))
+
+    if (looksLikeConversational && !lastMessage.steps) {
+      // 可能是对话模式，触发坍缩
+      if (!lastMessageConversationalMode) {
+        setLastMessageCollapsing(true)
+        setTimeout(() => {
+          setLastMessageConversationalMode(true)
+          setLastMessageCollapsing(false)
+        }, 800)
+      }
+    } else {
+      // 重置状态
+      setLastMessageConversationalMode(false)
+      setLastMessageCollapsing(false)
+    }
+  }, [messages])
+
+  // 构建对话历史（从 messages 中提取）
+  const buildHistory = (): Array<{ role: string; content: string }> => {
+    const history: Array<{ role: string; content: string }> = []
+
+    for (const msg of messages) {
+      if (msg.role === 'user' && msg.text) {
+        history.push({ role: 'user', content: msg.text })
+      } else if (msg.role === 'assistant' && msg.contents) {
+        // 提取助手回复的文本内容
+        const textContents = msg.contents.filter(c => c.type === 'text') as TextContent[]
+        if (textContents.length > 0) {
+          const combinedText = textContents.map(c => c.text).join('\n\n')
+          history.push({ role: 'assistant', content: combinedText })
+        }
+      }
+    }
+
+    return history
+  }
+
   // 更新快速追问建议（在对话完成后）
   useEffect(() => {
     const updateSuggestions = async () => {
       // 只有在有消息、不在加载中、且有sessionId时才更新
       if (messages.length > 0 && !isLoading && sessionId) {
         try {
-          const { getSuggestions } = await import('@/lib/api/analysis')
+          const { getSuggestions } = await import('@/lib/api/chat')
           const suggestions = await getSuggestions(sessionId)
           if (suggestions && suggestions.length > 0) {
             setQuickSuggestions(suggestions)
@@ -212,14 +270,25 @@ export function ChatArea() {
       emotion_des?: string | null
       news_list?: Array<{ title: string; summary: string; date: string; source: string }>
       conclusion?: string
+      is_time_series?: boolean
+      conversational_response?: string
     },
     currentStep: number = 0,
     status: string = 'pending'
   ): (TextContent | ChartContent | TableContent)[] => {
     const contents: (TextContent | ChartContent | TableContent)[] = []
 
+    // 🎯 对话模式：数据获取失败，显示 AI 友好解释
+    if (data.is_time_series === false && data.conversational_response) {
+      contents.push({
+        type: 'text',
+        text: data.conversational_response
+      })
+      return contents
+    }
+
     // 判断是否是简单问答：只有 conclusion，没有其他结构化数据
-    const isSimpleAnswer = data.conclusion && 
+    const isSimpleAnswer = data.conclusion &&
       (!data.time_series_full || data.time_series_full.length === 0) &&
       (!data.emotion || data.emotion === null) &&
       (!data.news_list || data.news_list.length === 0)
@@ -279,10 +348,10 @@ export function ChatArea() {
     if ((currentStep >= 6 || isCompleted) && data.time_series_full && data.time_series_full.length > 0 && data.prediction_done) {
       const originalLength = data.time_series_original?.length || 0
       const allLabels = data.time_series_full.map((p) => p.date)
-      const historicalData = data.time_series_full.map((p, idx) => 
+      const historicalData = data.time_series_full.map((p, idx) =>
         idx < originalLength ? p.value : null
       )
-      const forecastData = data.time_series_full.map((p, idx) => 
+      const forecastData = data.time_series_full.map((p, idx) =>
         idx >= originalLength ? p.value : null
       )
 
@@ -335,7 +404,7 @@ export function ChatArea() {
       }
       setMessages((prev: Message[]) => [...prev, userMessage])
       setInputValue('')
-      
+
       const assistantMessage: Message = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
@@ -393,13 +462,13 @@ export function ChatArea() {
         setMessages((prev: Message[]) => prev.map((msg: Message) =>
           msg.id === assistantMessageId
             ? {
-                ...msg,
-                contents: [{
-                  type: 'text',
-                  text: data.conclusion || '已收到回答'
-                }],
-                steps: undefined
-              }
+              ...msg,
+              contents: [{
+                type: 'text',
+                text: data.conclusion || '已收到回答'
+              }],
+              steps: undefined
+            }
             : msg
         ))
       } else {
@@ -410,8 +479,8 @@ export function ChatArea() {
             const { data, steps: currentStep, status } = statusResponse
 
             // 判断是否是简单问答（只有 conclusion，没有其他结构化数据）
-            const isSimpleAnswer = status === 'completed' && 
-              data.conclusion && 
+            const isSimpleAnswer = status === 'completed' &&
+              data.conclusion &&
               (!data.time_series_full || data.time_series_full.length === 0) &&
               (!data.emotion || data.emotion === null) &&
               (!data.news_list || data.news_list.length === 0)
@@ -421,13 +490,13 @@ export function ChatArea() {
               setMessages((prev: Message[]) => prev.map((msg: Message) =>
                 msg.id === assistantMessageId
                   ? {
-                      ...msg,
-                      contents: [{
-                        type: 'text',
-                        text: data.conclusion
-                      }],
-                      steps: undefined
-                    }
+                    ...msg,
+                    contents: [{
+                      type: 'text',
+                      text: data.conclusion
+                    }],
+                    steps: undefined
+                  }
                   : msg
               ))
             } else {
@@ -442,10 +511,10 @@ export function ChatArea() {
               setMessages((prev: Message[]) => prev.map((msg: Message) =>
                 msg.id === assistantMessageId
                   ? {
-                      ...msg,
-                      steps: status === 'completed' ? undefined : steps, // 完成后隐藏步骤
-                      contents: contents.length > 0 ? contents : [] // 清空旧内容，避免显示上次的数据
-                    }
+                    ...msg,
+                    steps: status === 'completed' ? undefined : steps, // 完成后隐藏步骤
+                    contents: contents.length > 0 ? contents : [] // 清空旧内容，避免显示上次的数据
+                  }
                   : msg
               ))
             }
@@ -580,6 +649,20 @@ export function ChatArea() {
         <div className="max-w-4xl mx-auto">
           {/* 输入框行 */}
           <div className="flex items-center gap-2">
+            {/* 设置折叠按钮 */}
+            <button
+              onClick={() => setIsSettingsExpanded(!isSettingsExpanded)}
+              className={cn(
+                "p-2 rounded-lg transition-all flex-shrink-0",
+                isSettingsExpanded
+                  ? "bg-violet-500/20 text-violet-400"
+                  : "hover:bg-dark-600 text-gray-500"
+              )}
+              title="设置"
+            >
+              <Settings2 className="w-4 h-4" />
+            </button>
+
             {/* 输入框 */}
             <div className="flex-1 relative">
               <div className="glass rounded-xl border border-white/10 focus-within:border-violet-500/50 transition-colors">
@@ -604,6 +687,78 @@ export function ChatArea() {
             </button>
           </div>
 
+          {/* 可折叠设置面板 */}
+          {isSettingsExpanded && (
+            <div className="mt-2 p-3 bg-dark-700/30 rounded-lg border border-white/5 space-y-3">
+              {/* 功能开关 */}
+              <div className="flex items-center gap-4">
+                <span className="text-[11px] text-gray-500 w-16">启用功能</span>
+                <div className="flex items-center gap-3">
+                  {/* 序列预测 */}
+                  <button
+                    onClick={() => setTools({ ...tools, forecast: !tools.forecast })}
+                    className={cn(
+                      "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border",
+                      tools.forecast
+                        ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
+                        : "bg-dark-600/50 text-gray-500 border-white/5 hover:border-white/10"
+                    )}
+                  >
+                    序列预测
+                  </button>
+                  {/* 研报检索 */}
+                  <button
+                    disabled
+                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-dark-600/30 text-gray-600 border border-white/5 cursor-not-allowed"
+                    title="即将推出"
+                  >
+                    研报检索
+                  </button>
+                  {/* 新闻分析 */}
+                  <button
+                    disabled
+                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-dark-600/30 text-gray-600 border border-white/5 cursor-not-allowed"
+                    title="即将推出"
+                  >
+                    新闻分析
+                  </button>
+                </div>
+              </div>
+
+              {/* 模型选择 - 仅在序列预测开启时显示 */}
+              {tools.forecast && (
+                <div className="flex items-center gap-4">
+                  <span className="text-[11px] text-gray-500 w-16">预测模型</span>
+                  <div className="flex items-center gap-1.5">
+                    {(['prophet', 'xgboost', 'randomforest', 'dlinear'] as const).map((model) => (
+                      <button
+                        key={model}
+                        onClick={() => setSelectedModel(model)}
+                        className={cn(
+                          "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border",
+                          selectedModel === model
+                            ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
+                            : "bg-dark-600/50 text-gray-400 border-white/5 hover:border-white/10 hover:text-gray-300"
+                        )}
+                      >
+                        {model === 'prophet' && 'Prophet'}
+                        {model === 'xgboost' && 'XGBoost'}
+                        {model === 'randomforest' && 'RandomForest'}
+                        {model === 'dlinear' && 'DLinear'}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="text-[10px] text-gray-600 ml-auto">
+                    {selectedModel === 'prophet' && '适合长期预测'}
+                    {selectedModel === 'xgboost' && '捕捉非线性关系'}
+                    {selectedModel === 'randomforest' && '稳定性好'}
+                    {selectedModel === 'dlinear' && '轻量高效'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* 底部提示 */}
           <div className="flex items-center justify-between mt-1.5 px-1">
             <div className="flex items-center gap-2 text-[10px] text-gray-600">
@@ -611,7 +766,7 @@ export function ChatArea() {
               <span>发送</span>
             </div>
             <div className="text-[10px] text-gray-600">
-              智能识别意图 · 自动选择模型
+              {tools.forecast ? `${selectedModel.toUpperCase()} · 序列预测` : '直接对话'}
             </div>
           </div>
         </div>
