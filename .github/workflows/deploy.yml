@@ -42,8 +42,11 @@ jobs:
           
           cat > backend/.env << EOF
           DEEPSEEK_API_KEY=${{ secrets.DEEPSEEK_API_KEY }}
+          HF_TOKEN=${{ secrets.HF_TOKEN }}
           HOST=0.0.0.0
           PORT=8000
+          QDRANT_HOST=qdrant
+          QDRANT_PORT=6333
           REDIS_HOST=redis
           REDIS_PORT=6379
           REDIS_DB=0

@@ -2,13 +2,11 @@
 
 import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
-import { Download, Share2, MoreVertical, Paperclip, Send, Zap, Settings2, ChevronDown, ChevronRight } from 'lucide-react'
+import { Download, Share2, MoreVertical, Paperclip, Send, Zap, ChevronDown, ChevronRight } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { QuickSuggestions } from './QuickSuggestions'
 import { AnalysisCards } from './AnalysisCards'
 import { cn } from '@/lib/utils'
-import type { ToolSettings } from '@/lib/api/chat'
-import { DEFAULT_TOOL_SETTINGS } from '@/lib/api/chat'
 
 // 步骤状态
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -59,6 +57,9 @@ export interface IntentInfo {
   reason: string
 }
 
+// 渲染模式：根据 intent 决定 UI 渲染方式
+export type RenderMode = 'thinking' | 'forecast' | 'chat'
+
 // 消息类型定义
 export interface Message {
   id: string
@@ -95,17 +96,18 @@ export interface Message {
   // 对话模式标志
   isConversationalMode?: boolean
   isCollapsing?: boolean
+  // 渲染模式：thinking(思考中) / forecast(预测分析) / chat(简单对话)
+  renderMode?: RenderMode
 }
 
-// 预测步骤定义（7个步骤）- 与后端 STEPS 保持一致
+// 预测步骤定义（6个步骤）- 与后端 FORECAST_STEPS 保持一致
 export const PREDICTION_STEPS: Omit<Step, 'status' | 'message'>[] = [
-  { id: '1', name: '数据获取' },
-  { id: '2', name: '新闻搜索' },
-  { id: '3', name: '情绪分析' },
-  { id: '4', name: '智能建模' },
-  { id: '5', name: '时序预测' },
-  { id: '6', name: '结果渲染' },
-  { id: '7', name: '报告生成' },
+  { id: '1', name: '意图识别' },
+  { id: '2', name: '股票验证' },
+  { id: '3', name: '数据获取' },
+  { id: '4', name: '分析处理' },
+  { id: '5', name: '模型预测' },
+  { id: '6', name: '报告生成' },
 ]
 
 // 默认快速追问建议
@@ -135,11 +137,8 @@ export function ChatArea() {
   const [messages, setMessages] = useState<Message[]>([])
   const [inputValue, setInputValue] = useState('')
   const [isLoading, setIsLoading] = useState(false)
-  const [selectedModel, setSelectedModel] = useState<'prophet' | 'xgboost' | 'randomforest' | 'dlinear'>('prophet')
   const [sessionId, setSessionId] = useState<string>(() => getOrCreateSessionId())
   const [quickSuggestions, setQuickSuggestions] = useState<string[]>(defaultQuickSuggestions)
-  const [tools, setTools] = useState<ToolSettings>(DEFAULT_TOOL_SETTINGS)
-  const [isSettingsExpanded, setIsSettingsExpanded] = useState(false)
 
   // 对话模式动画状态 (针对最后一条消息)
   const [lastMessageConversationalMode, setLastMessageConversationalMode] = useState(false)
@@ -243,7 +242,7 @@ export function ChatArea() {
   }, [messages.length, isLoading, sessionId])
 
   // 将后端的步骤数转换为前端的 Step[] 数组
-  const convertSteps = (currentStep: number, totalSteps: number = 7, status: string): Step[] => {
+  const convertSteps = (currentStep: number, totalSteps: number = 6, status: string): Step[] => {
     return PREDICTION_STEPS.map((step, index) => {
       const stepNum = index + 1
       if (stepNum < currentStep) {
@@ -268,7 +267,14 @@ export function ChatArea() {
       prediction_done?: boolean
       emotion?: number | null
       emotion_des?: string | null
-      news_list?: Array<{ title: string; summary: string; date: string; source: string }>
+      news_list?: Array<{
+        summarized_title: string
+        summarized_content: string
+        original_title: string
+        url: string
+        published_date: string
+        source_type: string
+      }>
       conclusion?: string
       is_time_series?: boolean
       conversational_response?: string
@@ -305,11 +311,11 @@ export function ChatArea() {
     }
 
     // 结构化回答：根据当前步骤生成内容（只显示已完成步骤的内容）
-    const isCompleted = status === 'completed' || currentStep >= 7
+    // 后端 6 步：1-意图识别, 2-股票验证, 3-数据获取, 4-分析处理, 5-模型预测, 6-报告生成
+    const isCompleted = status === 'completed' || currentStep >= 6
 
-    // 1. 市场情绪（步骤5完成后显示）
-    // 只有当步骤 >= 5 或已完成时，才显示情绪数据
-    if (currentStep >= 5 || isCompleted) {
+    // 1. 市场情绪（步骤4"分析处理"完成后显示）
+    if (currentStep >= 4 || isCompleted) {
       if (data.emotion !== null && data.emotion !== undefined && typeof data.emotion === 'number' && data.emotion_des) {
         // 使用后端返回的真实数据
         contents.push({
@@ -328,27 +334,27 @@ export function ChatArea() {
       // 如果步骤 < 5，不添加情绪内容（MessageBubble 会显示"情绪分析中..."）
     }
 
-    // 2. 新闻列表表格（步骤4完成后显示）
-    // 只有当步骤 >= 4 或已完成时，才显示新闻
-    if ((currentStep >= 4 || isCompleted) && data.news_list && data.news_list.length > 0) {
+    // 2. 新闻列表表格（步骤3"数据获取"完成后显示）
+    if ((currentStep >= 3 || isCompleted) && data.news_list && data.news_list.length > 0) {
       contents.push({
         type: 'table',
         title: '', // 标题由外层MessageBubble显示"相关新闻"，这里不重复显示
         headers: ['标题', '来源', '日期'],
         rows: data.news_list.slice(0, 5).map((news) => [
-          news.title,
-          news.source,
-          news.date
+          news.summarized_title,
+          news.source_type === 'search' ? '网络搜索' : '领域资讯',
+          news.published_date
         ])
       })
     }
 
     // 3. 价格走势图表（分步渲染）
-    // 步骤2-3：如果有原始数据，先渲染历史价格
-    if ((currentStep >= 2 || isCompleted) && data.time_series_original && data.time_series_original.length > 0) {
+    // 步骤3"数据获取"后：如果有原始数据，先渲染历史价格
+    if ((currentStep >= 3 || isCompleted) && data.time_series_original && data.time_series_original.length > 0) {
       const hasForecast = data.prediction_done && data.time_series_full && data.time_series_full.length > 0
-      
-      if (hasForecast && (currentStep >= 6 || isCompleted) && data.time_series_full) {
+
+      // 步骤5"模型预测"后：同时显示历史和预测价格
+      if (hasForecast && (currentStep >= 5 || isCompleted) && data.time_series_full) {
         // 步骤6+：同时显示历史和预测价格
         const originalLength = data.time_series_original.length
         const allLabels = data.time_series_full.map((p) => p.date)
@@ -411,9 +417,8 @@ export function ChatArea() {
       }
     }
 
-    // 4. 综合分析报告（步骤7完成后显示）
-    // 只有当步骤 >= 7 或已完成时，才显示报告
-    if ((currentStep >= 7 || isCompleted) && data.conclusion) {
+    // 4. 综合分析报告（步骤6"报告生成"完成后显示）
+    if ((currentStep >= 6 || isCompleted) && data.conclusion) {
       contents.push({
         type: 'text',
         text: data.conclusion
@@ -426,32 +431,6 @@ export function ChatArea() {
   const handleSend = async (messageOverride?: string) => {
     const messageToSend = messageOverride || inputValue
     if (!messageToSend.trim() || isLoading) return
-
-    // 如果 forecast tool 关闭，直接回答（保留旧逻辑）
-    if (!tools.forecast) {
-      // 这里可以保留旧的流式回答逻辑，或者也改为使用 analysis API
-      // 暂时先提示用户开启序列预测功能
-      const userMessage: Message = {
-        id: Date.now().toString(),
-        role: 'user',
-        text: messageToSend,
-        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-      }
-      setMessages((prev: Message[]) => [...prev, userMessage])
-      setInputValue('')
-
-      const assistantMessage: Message = {
-        id: (Date.now() + 1).toString(),
-        role: 'assistant',
-        timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
-        contents: [{
-          type: 'text',
-          text: '请开启"序列预测"功能以使用分析功能。'
-        }]
-      }
-      setMessages((prev: Message[]) => [...prev, assistantMessage])
-      return
-    }
 
     const userMessage: Message = {
       id: Date.now().toString(),
@@ -471,6 +450,7 @@ export function ChatArea() {
       role: 'assistant',
       timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
       contents: [], // 初始为空数组，避免显示旧内容
+      renderMode: 'thinking', // 初始为思考中状态
     }
 
     setMessages((prev: Message[]) => [...prev, assistantMessage])
@@ -480,7 +460,7 @@ export function ChatArea() {
       const { createAnalysisTask, pollAnalysisStatus } = await import('@/lib/api/analysis')
 
       // 创建分析任务（传递当前 sessionId 以获取对话历史）
-      const result = await createAnalysisTask(messageToSend, selectedModel, '', sessionId)
+      const result = await createAnalysisTask(messageToSend, 'prophet', '', sessionId)
       const currentSessionId = result.session_id
       setSessionId(currentSessionId)
       if (typeof window !== 'undefined') {
@@ -493,7 +473,7 @@ export function ChatArea() {
         const statusResponse = await getAnalysisStatus(currentSessionId)
         const { data, status } = statusResponse
 
-        // 简单问答：只显示文本内容
+        // 简单问答：只显示文本内容，renderMode 为 chat
         setMessages((prev: Message[]) => prev.map((msg: Message) =>
           msg.id === assistantMessageId
             ? {
@@ -502,7 +482,8 @@ export function ChatArea() {
                 type: 'text',
                 text: data.conclusion || '已收到回答'
               }],
-              steps: undefined
+              steps: undefined,
+              renderMode: 'chat' as RenderMode
             }
             : msg
         ))
@@ -513,15 +494,22 @@ export function ChatArea() {
           (statusResponse) => {
             const { data, steps: currentStep, status } = statusResponse
 
-            // 判断是否是简单问答（只有 conclusion，没有其他结构化数据）
-            const isSimpleAnswer = status === 'completed' &&
-              data.conclusion &&
-              (!data.time_series_full || data.time_series_full.length === 0) &&
-              (!data.emotion || data.emotion === null) &&
-              (!data.news_list || data.news_list.length === 0)
+            // 🎯 根据后端返回的 intent 决定渲染模式
+            // data.intent: "forecast" | "chat" | "rag" | "news" | "out_of_scope" | "pending"
+            const isForecastIntent = data.intent === 'forecast' ||
+              (data.unified_intent && data.unified_intent.is_forecast)
+
+            // 确定渲染模式
+            let currentRenderMode: RenderMode = 'thinking'
+            if (data.intent && data.intent !== 'pending') {
+              currentRenderMode = isForecastIntent ? 'forecast' : 'chat'
+            }
+
+            // 判断是否是简单问答（非 forecast 意图，只有 conclusion）
+            const isSimpleAnswer = !isForecastIntent && status === 'completed' && data.conclusion
 
             if (isSimpleAnswer) {
-              // 简单问答：只显示文本内容
+              // 简单问答：只显示文本内容，renderMode 为 chat
               setMessages((prev: Message[]) => prev.map((msg: Message) =>
                 msg.id === assistantMessageId
                   ? {
@@ -530,14 +518,15 @@ export function ChatArea() {
                       type: 'text',
                       text: data.conclusion
                     }],
-                    steps: undefined
+                    steps: undefined,
+                    renderMode: 'chat' as RenderMode
                   }
                   : msg
               ))
             } else {
-              // 结构化回答：显示完整分析结果
+              // 预测分析：显示完整分析结果
               // 转换步骤
-              const steps = convertSteps(currentStep, 7, status)
+              const steps = convertSteps(currentStep, data.total_steps || 6, status)
 
               // 转换内容（传入当前步骤和状态，只显示已完成步骤的内容）
               const contents = convertAnalysisToContents(data, currentStep, status)
@@ -548,7 +537,8 @@ export function ChatArea() {
                   ? {
                     ...msg,
                     steps: status === 'completed' ? undefined : steps, // 完成后隐藏步骤
-                    contents: contents.length > 0 ? contents : [] // 清空旧内容，避免显示上次的数据
+                    contents: contents.length > 0 ? contents : [], // 清空旧内容，避免显示上次的数据
+                    renderMode: currentRenderMode // 根据 intent 设置渲染模式
                   }
                   : msg
               ))
@@ -684,20 +674,6 @@ export function ChatArea() {
         <div className="max-w-4xl mx-auto">
           {/* 输入框行 */}
           <div className="flex items-center gap-2">
-            {/* 设置折叠按钮 */}
-            <button
-              onClick={() => setIsSettingsExpanded(!isSettingsExpanded)}
-              className={cn(
-                "p-2 rounded-lg transition-all flex-shrink-0",
-                isSettingsExpanded
-                  ? "bg-violet-500/20 text-violet-400"
-                  : "hover:bg-dark-600 text-gray-500"
-              )}
-              title="设置"
-            >
-              <Settings2 className="w-4 h-4" />
-            </button>
-
             {/* 输入框 */}
             <div className="flex-1 relative">
               <div className="glass rounded-xl border border-white/10 focus-within:border-violet-500/50 transition-colors">
@@ -722,78 +698,6 @@ export function ChatArea() {
             </button>
           </div>
 
-          {/* 可折叠设置面板 */}
-          {isSettingsExpanded && (
-            <div className="mt-2 p-3 bg-dark-700/30 rounded-lg border border-white/5 space-y-3">
-              {/* 功能开关 */}
-              <div className="flex items-center gap-4">
-                <span className="text-[11px] text-gray-500 w-16">启用功能</span>
-                <div className="flex items-center gap-3">
-                  {/* 序列预测 */}
-                  <button
-                    onClick={() => setTools({ ...tools, forecast: !tools.forecast })}
-                    className={cn(
-                      "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border",
-                      tools.forecast
-                        ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
-                        : "bg-dark-600/50 text-gray-500 border-white/5 hover:border-white/10"
-                    )}
-                  >
-                    序列预测
-                  </button>
-                  {/* 研报检索 */}
-                  <button
-                    disabled
-                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-dark-600/30 text-gray-600 border border-white/5 cursor-not-allowed"
-                    title="即将推出"
-                  >
-                    研报检索
-                  </button>
-                  {/* 新闻分析 */}
-                  <button
-                    disabled
-                    className="px-2.5 py-1 rounded-md text-[11px] font-medium bg-dark-600/30 text-gray-600 border border-white/5 cursor-not-allowed"
-                    title="即将推出"
-                  >
-                    新闻分析
-                  </button>
-                </div>
-              </div>
-
-              {/* 模型选择 - 仅在序列预测开启时显示 */}
-              {tools.forecast && (
-                <div className="flex items-center gap-4">
-                  <span className="text-[11px] text-gray-500 w-16">预测模型</span>
-                  <div className="flex items-center gap-1.5">
-                    {(['prophet', 'xgboost', 'randomforest', 'dlinear'] as const).map((model) => (
-                      <button
-                        key={model}
-                        onClick={() => setSelectedModel(model)}
-                        className={cn(
-                          "px-2.5 py-1 rounded-md text-[11px] font-medium transition-all border",
-                          selectedModel === model
-                            ? "bg-violet-500/20 text-violet-300 border-violet-500/30"
-                            : "bg-dark-600/50 text-gray-400 border-white/5 hover:border-white/10 hover:text-gray-300"
-                        )}
-                      >
-                        {model === 'prophet' && 'Prophet'}
-                        {model === 'xgboost' && 'XGBoost'}
-                        {model === 'randomforest' && 'RandomForest'}
-                        {model === 'dlinear' && 'DLinear'}
-                      </button>
-                    ))}
-                  </div>
-                  <span className="text-[10px] text-gray-600 ml-auto">
-                    {selectedModel === 'prophet' && '适合长期预测'}
-                    {selectedModel === 'xgboost' && '捕捉非线性关系'}
-                    {selectedModel === 'randomforest' && '稳定性好'}
-                    {selectedModel === 'dlinear' && '轻量高效'}
-                  </span>
-                </div>
-              )}
-            </div>
-          )}
-
           {/* 底部提示 */}
           <div className="flex items-center justify-between mt-1.5 px-1">
             <div className="flex items-center gap-2 text-[10px] text-gray-600">
@@ -801,7 +705,7 @@ export function ChatArea() {
               <span>发送</span>
             </div>
             <div className="text-[10px] text-gray-600">
-              {tools.forecast ? `${selectedModel.toUpperCase()} · 序列预测` : '直接对话'}
+              智能分析
             </div>
           </div>
         </div>

@@ -2,14 +2,20 @@
 Session 数据模型
 ================
 
-定义分析会话的数据结构
+定义统一的会话和消息数据结构
+
+架构说明:
+- Session: 一整个多轮对话，包含多个 Message
+- Message: 一轮 QA，包含用户问题和助手回答
+- UnifiedIntent: 统一意图识别结果，一次 LLM 调用返回所有信息
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Optional
-from datetime import datetime
+from typing import List, Optional, Dict
 from enum import Enum
 
+
+# ========== 枚举类型 ==========
 
 class SessionStatus(str, Enum):
     """会话状态"""
@@ -19,6 +25,16 @@ class SessionStatus(str, Enum):
     ERROR = "error"
 
 
+class StepStatus(str, Enum):
+    """步骤状态"""
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    ERROR = "error"
+
+
+# ========== 基础数据类型 ==========
+
 class TimeSeriesPoint(BaseModel):
     """时序数据点"""
     date: str
@@ -26,71 +42,181 @@ class TimeSeriesPoint(BaseModel):
     is_prediction: bool = False
 
 
-class NewsItem(BaseModel):
-    """新闻条目"""
+class StockInfo(BaseModel):
+    """股票信息 (股票 RAG 匹配结果)"""
+    stock_code: str        # "600519"
+    stock_name: str        # "贵州茅台"
+    market: str            # "SH" | "SZ"
+
+
+class RAGSource(BaseModel):
+    """RAG 来源 (研报)"""
+    filename: str          # "茅台2024研报.pdf"
+    page: int              # 页码
+    content_snippet: str   # 摘要片段
+    score: float = 0.0     # 相关度分数
+
+
+class WebSource(BaseModel):
+    """网页来源"""
     title: str
-    summary: str
-    date: str
-    source: str
+    url: str
+    source_type: str       # "search" | "domain_info"
+
+
+class SummarizedNewsItem(BaseModel):
+    """LLM 总结后的新闻条目"""
+    summarized_title: str       # LLM 总结的标题
+    summarized_content: str     # LLM 总结的摘要
+    original_title: str         # 原标题
+    url: str                    # 来源链接
+    published_date: str
+    source_type: str            # "search" | "domain_info"
 
 
 class ReportItem(BaseModel):
-    """研报条目"""
-    title: str
-    summary: str
-    pdf_path: str
+    """研报条目 (LLM 提取的观点)"""
+    title: str                  # 研报标题
+    viewpoint: str              # LLM 提取的观点
+    source: RAGSource           # 来源信息
 
 
-class EmotionAnalysis(BaseModel):
-    """情绪分析结果"""
-    score: float = Field(..., ge=-1, le=1, description="情绪分数 -1到1")
-    description: str = Field(..., description="情绪描述")
+class StepDetail(BaseModel):
+    """步骤详情"""
+    id: str
+    name: str
+    status: StepStatus = StepStatus.PENDING
+    message: str = ""
 
 
-class AnalysisSession(BaseModel):
-    """分析会话完整数据模型"""
-    
+# ========== 意图识别相关 ==========
+
+class UnifiedIntent(BaseModel):
+    """
+    统一意图识别结果
+
+    一次 LLM 调用返回所有信息，包含:
+    - 核心分支判断 (is_in_scope, is_forecast)
+    - 工具开关 (enable_rag, enable_search, enable_domain_info)
+    - 股票相关 (stock_mention)
+    - 初步关键词 (raw_*_keywords，股票匹配后会被优化)
+    - 预测参数 (仅 is_forecast=true 时使用)
+    """
+    # 核心分支判断
+    is_in_scope: bool = Field(..., description="是否在服务范围内 (金融/股票相关)")
+    is_forecast: bool = Field(default=False, description="是否需要预测")
+
+    # 工具开关
+    enable_rag: bool = Field(default=False, description="研报检索")
+    enable_search: bool = Field(default=False, description="网络搜索 (Tavily)")
+    enable_domain_info: bool = Field(default=False, description="领域信息 (AkShare news)")
+
+    # 股票相关
+    stock_mention: Optional[str] = Field(default=None, description="用户提到的股票名称/代码")
+
+    # 初步关键词 (LLM 提取，股票匹配后会被优化)
+    raw_search_keywords: List[str] = Field(default_factory=list)
+    raw_rag_keywords: List[str] = Field(default_factory=list)
+    raw_domain_keywords: List[str] = Field(default_factory=list)
+
+    # 预测参数 (仅 is_forecast=true 时使用)
+    forecast_model: str = Field(default="prophet")
+    history_days: int = Field(default=365)
+    forecast_horizon: int = Field(default=30)
+
+    # 原因说明
+    reason: str = Field(default="")
+
+    # 超出范围时的友好回复
+    out_of_scope_reply: Optional[str] = Field(default=None)
+
+
+class ResolvedKeywords(BaseModel):
+    """股票匹配后的最终关键词"""
+    search_keywords: List[str] = Field(default_factory=list)
+    rag_keywords: List[str] = Field(default_factory=list)
+    domain_keywords: List[str] = Field(default_factory=list)
+
+
+class StockMatchResult(BaseModel):
+    """股票匹配结果"""
+    success: bool
+    stock_info: Optional[StockInfo] = None
+    confidence: float = 0.0
+    suggestions: List[str] = Field(default_factory=list)
+    error_message: Optional[str] = None
+
+
+# ========== 核心数据模型 ==========
+
+class SessionData(BaseModel):
+    """
+    会话数据 (用于 Redis 存储和 API 响应)
+
+    统一的数据结构，支持预测和非预测两种流程
+    """
     # 基础信息
     session_id: str
-    context: str = ""
-    steps: int = 0
-    status: SessionStatus = SessionStatus.PENDING
-    is_time_series: bool = True
-    
-    # 时序数据
-    time_series_original: List[TimeSeriesPoint] = []
-    time_series_full: List[TimeSeriesPoint] = []
-    prediction_done: bool = False
-    prediction_start_day: Optional[str] = None
-    
-    # 新增功能
-    news_list: List[NewsItem] = []
-    report_list: List[ReportItem] = []
-    emotion: Optional[float] = None
-    emotion_des: Optional[str] = None
-    
-    # 综合报告
-    conclusion: str = ""
-    
-    # 对话模式（数据获取失败时）
-    conversational_response: str = ""  # AI生成的对话回复
-    error_type: Optional[str] = None  # "data_fetch_failed" 等
-    
-    # 元数据
     created_at: str
     updated_at: str
-    error_message: Optional[str] = None
-    
-    # 额外配置
+    status: SessionStatus = SessionStatus.PENDING
+
+    # 用户输入
+    user_query: str = ""
+    context: str = ""
+
+    # 意图识别
+    intent: str = "pending"  # forecast/rag/news/chat/out_of_scope
+    unified_intent: Optional[UnifiedIntent] = None
+
+    # 股票匹配
+    stock_match: Optional[StockMatchResult] = None
     stock_code: Optional[str] = None
+
+    # 关键词
+    resolved_keywords: Optional[ResolvedKeywords] = None
+
+    # 步骤进度
+    steps: int = 0
+    total_steps: int = 0
+    step_details: List[StepDetail] = Field(default_factory=list)
+
+    # === 预测流程数据 ===
+    is_forecast: bool = False
     model_name: str = "prophet"
 
+    # 时序数据
+    time_series_original: List[TimeSeriesPoint] = Field(default_factory=list)
+    time_series_full: List[TimeSeriesPoint] = Field(default_factory=list)
+    prediction_done: bool = False
+    prediction_start_day: Optional[str] = None
+
+    # 新闻和研报
+    news_list: List[SummarizedNewsItem] = Field(default_factory=list)
+    report_list: List[ReportItem] = Field(default_factory=list)
+    rag_sources: List[RAGSource] = Field(default_factory=list)
+
+    # 情感分析
+    emotion: Optional[float] = None  # -1 到 1
+    emotion_des: Optional[str] = None
+
+    # === 通用数据 ===
+    conclusion: str = ""
+    error_message: Optional[str] = None
+
+    # 对话历史
+    conversation_history: List[Dict[str, str]] = Field(default_factory=list)
+
+
+# ========== API 请求/响应模型 ==========
 
 class CreateAnalysisRequest(BaseModel):
     """创建分析任务请求"""
     message: str = Field(..., description="用户问题")
+    session_id: Optional[str] = Field(default=None, description="会话ID，多轮对话时复用")
     model: str = Field(default="prophet", description="预测模型")
     context: str = Field(default="", description="上下文")
+    force_intent: Optional[str] = Field(default=None, description="强制指定意图")
 
 
 class AnalysisStatusResponse(BaseModel):
@@ -98,4 +224,25 @@ class AnalysisStatusResponse(BaseModel):
     session_id: str
     status: SessionStatus
     steps: int
-    data: AnalysisSession
+    total_steps: int = 0
+    data: SessionData
+
+
+# ========== 新闻相关模型 ==========
+
+class NewsItem(BaseModel):
+    """原始新闻条目 (合并前)"""
+    title: str
+    content: str
+    url: str
+    published_date: str
+    source_type: str        # "search" | "domain_info"
+    score: float = 0.0
+
+
+class NewsSummaryResult(BaseModel):
+    """新闻总结结果"""
+    summary_text: str
+    news_items: List[SummarizedNewsItem]
+    total_before_dedup: int
+    total_after_dedup: int
