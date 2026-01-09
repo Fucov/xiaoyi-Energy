@@ -381,7 +381,7 @@ class NewsRAGService:
 {{"summarized_title": "...", "summarized_content": "..."}}"""
 
         response = await llm_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="deepseek-chat",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
             max_tokens=200

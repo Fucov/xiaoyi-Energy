@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import { Copy, ThumbsUp, ThumbsDown, RotateCcw, ChevronDown, ChevronRight, Brain, TrendingUp, TrendingDown, Minus } from 'lucide-react'
-import type { Message, IntentInfo } from './ChatArea'
+import type { Message, IntentInfo, RenderMode } from './ChatArea'
 import { MessageContent } from './MessageContent'
 import { StepProgress } from './StepProgress'
 
@@ -215,17 +215,19 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               </div>
             )}
 
-            {/* 结构化内容布局 */}
+            {/* 结构化内容布局 - 根据 renderMode 决定渲染方式 */}
             {(() => {
               const contents = message.contents || (message.content ? [message.content] : [])
               const hasContents = contents.length > 0
+              const renderMode = message.renderMode || 'thinking'
 
               // 如果没有contents但有text，转换为text content
               if (!hasContents && displayText) {
                 contents.push({ type: 'text', text: displayText })
               }
 
-              if (!hasContents && !displayText && !message.steps) {
+              // 🎯 renderMode === 'thinking': 显示思考中动画
+              if (renderMode === 'thinking' && !hasContents && !displayText && !message.steps) {
                 return (
                   <div className="glass rounded-2xl px-4 py-3 text-gray-400">
                     <div className="flex items-center gap-2">
@@ -238,7 +240,7 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 
               // 如果有步骤进度条，或者有结构化内容，显示四个结构化部分
               const hasSteps = message.steps && message.steps.length > 0
-              
+
               if (hasContents || displayText || hasSteps) {
                 // 分类内容：图表、表格、文本
                 const charts = contents.filter(c => c.type === 'chart')
@@ -250,13 +252,16 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                   t.type === 'text' && t.text.startsWith('__EMOTION_MARKER__')
                 )
 
-                // 判断是否是简单问答：只有文本内容，没有图表、表格、情绪标记，且没有步骤进度条
-                const isSimpleAnswer = !hasSteps &&
+                // 🎯 renderMode === 'chat': 显示简单文本气泡
+                // 判断是否是简单问答：renderMode 为 chat，或者只有文本内容且没有结构化数据
+                const isSimpleAnswer = renderMode === 'chat' || (
+                  !hasSteps &&
                   charts.length === 0 &&
                   tables.length === 0 &&
                   !emotionText &&
                   texts.length > 0 &&
                   texts.every(t => !t.text.startsWith('__EMOTION_MARKER__'))
+                )
 
                 // 如果是简单问答，直接显示文本内容，不使用结构化布局
                 if (isSimpleAnswer) {
@@ -268,6 +273,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     </div>
                   )
                 }
+
+                // 🎯 renderMode === 'forecast': 显示进度条 + 结构化报告模板
 
                 // 🎯 对话模式：数据获取失败，只显示对话气泡
                 if (message.isConversationalMode && texts.length > 0) {

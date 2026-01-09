@@ -118,7 +118,7 @@ class UnifiedTaskProcessorV3:
             if not intent.is_in_scope:
                 session.save_conclusion(intent.out_of_scope_reply or "抱歉，我是金融时序分析助手，暂不支持此类问题。")
                 session.update_step_detail(1, "completed", "超出服务范围")
-                session.mark_completed_v2()
+                session.mark_completed()
                 return
 
             session.update_step_detail(1, "completed", f"意图: {'预测' if intent.is_forecast else '对话'}")
@@ -142,7 +142,7 @@ class UnifiedTaskProcessorV3:
                     error_msg = stock_match_result.error_message or "股票验证失败"
                     session.save_conclusion(error_msg)
                     session.update_step_detail(2, "error", error_msg)
-                    session.mark_completed_v2()
+                    session.mark_completed()
                     return
 
                 # 解析最终关键词
@@ -179,7 +179,7 @@ class UnifiedTaskProcessorV3:
                 )
 
             # 标记完成
-            session.mark_completed_v2()
+            session.mark_completed()
 
             # 添加助手回复到对话历史
             data = session.get()
@@ -281,7 +281,12 @@ class UnifiedTaskProcessorV3:
         session.save_time_series_original(original_points)
 
         news_items, sentiment_result = news_result
-        session.save_news([n.model_dump() for n in news_items] if news_items else [])
+        # 使用 LLM 总结新闻标题
+        if news_items:
+            summarized_news = await self._summarize_news_items(session.session_id, news_items)
+        else:
+            summarized_news = []
+        session.save_news(summarized_news)
 
         if rag_sources:
             session.save_rag_sources(rag_sources)
@@ -464,6 +469,44 @@ class UnifiedTaskProcessorV3:
         except Exception as e:
             print(f"[RAG] 研报检索失败: {e}")
             return []
+
+    async def _summarize_news_items(
+        self,
+        session_id: str,
+        news_items: List[NewsItem]
+    ) -> List[SummarizedNewsItem]:
+        """使用 LLM 总结新闻标题"""
+        if not news_items:
+            return []
+
+        try:
+            from openai import AsyncOpenAI
+
+            # 创建 LLM 客户端 (使用 DeepSeek)
+            llm_client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url="https://api.deepseek.com"
+            )
+
+            # 创建 NewsRAGService 并总结新闻
+            news_rag = create_news_rag_service(session_id)
+            result = await news_rag.summarize_news(news_items, llm_client)
+
+            return result.news_items
+        except Exception as e:
+            print(f"[News] LLM 总结失败，使用原标题: {e}")
+            # 降级：使用原标题
+            return [
+                SummarizedNewsItem(
+                    summarized_title=n.title[:50] if len(n.title) > 50 else n.title,
+                    summarized_content=n.content[:100] if n.content else "",
+                    original_title=n.title,
+                    url=n.url,
+                    published_date=n.published_date,
+                    source_type=n.source_type
+                )
+                for n in news_items
+            ]
 
     async def _analyze_sentiment(self, sentiment_data: dict) -> dict:
         """分析情感"""

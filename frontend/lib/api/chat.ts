@@ -21,7 +21,7 @@ export const DEFAULT_TOOL_SETTINGS: ToolSettings = {
 // 获取快速追问建议
 export async function getSuggestions(sessionId?: string | null): Promise<string[]> {
   try {
-    const response = await fetch(`${API_BASE_URL}/api/chat/suggestions`, {
+    const response = await fetch(`${API_BASE_URL}/api/analysis/suggestions`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',

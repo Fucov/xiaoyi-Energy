@@ -55,12 +55,16 @@ class ReportAgent:
             short_term_change = long_term_change = st_pct = lt_pct = 0
         
         # 2. 构建情绪分析块（以自然段形式描述，而非要点）
-        # sentiment_result 是 EmotionAnalysis 对象，包含 score 和 description
+        # sentiment_result 可能是 dict 或对象
         sentiment_section = ""
         if sentiment_result:
-            # EmotionAnalysis 是 Pydantic 模型，直接访问属性
-            score = float(sentiment_result.score)
-            description = sentiment_result.description
+            # 支持 dict 和对象两种格式
+            if isinstance(sentiment_result, dict):
+                score = float(sentiment_result.get("score", 0))
+                description = sentiment_result.get("description", "")
+            else:
+                score = float(sentiment_result.score)
+                description = sentiment_result.description
             
             # 根据分数判断情绪标签
             if score > 0.6:

@@ -17,10 +17,12 @@ export interface TimeSeriesPoint {
 }
 
 export interface NewsItem {
-  title: string
-  summary: string
-  date: string
-  source: string
+  summarized_title: string
+  summarized_content: string
+  original_title: string
+  url: string
+  published_date: string
+  source_type: string
 }
 
 export interface ReportItem {
@@ -35,12 +37,35 @@ export interface EmotionData {
   description: string
 }
 
+export interface UnifiedIntent {
+  is_in_scope: boolean
+  is_forecast: boolean
+  enable_rag: boolean
+  enable_search: boolean
+  enable_domain_info: boolean
+  stock_mention: string | null
+  raw_search_keywords: string[]
+  raw_rag_keywords: string[]
+  raw_domain_keywords: string[]
+  forecast_model: string
+  history_days: number
+  forecast_horizon: number
+  reason: string
+  out_of_scope_reply: string | null
+}
+
 export interface AnalysisSessionData {
   session_id: string
   context: string
   steps: number
+  total_steps: number
   status: 'pending' | 'processing' | 'completed' | 'error'
   is_time_series: boolean
+
+  // 意图识别
+  intent: string  // "forecast" | "chat" | "rag" | "news" | "out_of_scope" | "pending"
+  unified_intent: UnifiedIntent | null
+  is_forecast: boolean
 
   time_series_original: TimeSeriesPoint[]
   time_series_full: TimeSeriesPoint[]

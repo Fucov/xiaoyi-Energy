@@ -59,6 +59,9 @@ export interface IntentInfo {
   reason: string
 }
 
+// 渲染模式：根据 intent 决定 UI 渲染方式
+export type RenderMode = 'thinking' | 'forecast' | 'chat'
+
 // 消息类型定义
 export interface Message {
   id: string
@@ -95,6 +98,8 @@ export interface Message {
   // 对话模式标志
   isConversationalMode?: boolean
   isCollapsing?: boolean
+  // 渲染模式：thinking(思考中) / forecast(预测分析) / chat(简单对话)
+  renderMode?: RenderMode
 }
 
 // 预测步骤定义（7个步骤）- 与后端 STEPS 保持一致
@@ -268,7 +273,14 @@ export function ChatArea() {
       prediction_done?: boolean
       emotion?: number | null
       emotion_des?: string | null
-      news_list?: Array<{ title: string; summary: string; date: string; source: string }>
+      news_list?: Array<{
+        summarized_title: string
+        summarized_content: string
+        original_title: string
+        url: string
+        published_date: string
+        source_type: string
+      }>
       conclusion?: string
       is_time_series?: boolean
       conversational_response?: string
@@ -336,9 +348,9 @@ export function ChatArea() {
         title: '', // 标题由外层MessageBubble显示"相关新闻"，这里不重复显示
         headers: ['标题', '来源', '日期'],
         rows: data.news_list.slice(0, 5).map((news) => [
-          news.title,
-          news.source,
-          news.date
+          news.summarized_title,
+          news.source_type === 'search' ? '网络搜索' : '领域资讯',
+          news.published_date
         ])
       })
     }
@@ -436,6 +448,7 @@ export function ChatArea() {
       role: 'assistant',
       timestamp: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
       contents: [], // 初始为空数组，避免显示旧内容
+      renderMode: 'thinking', // 初始为思考中状态
     }
 
     setMessages((prev: Message[]) => [...prev, assistantMessage])
@@ -458,7 +471,7 @@ export function ChatArea() {
         const statusResponse = await getAnalysisStatus(currentSessionId)
         const { data, status } = statusResponse
 
-        // 简单问答：只显示文本内容
+        // 简单问答：只显示文本内容，renderMode 为 chat
         setMessages((prev: Message[]) => prev.map((msg: Message) =>
           msg.id === assistantMessageId
             ? {
@@ -467,7 +480,8 @@ export function ChatArea() {
                 type: 'text',
                 text: data.conclusion || '已收到回答'
               }],
-              steps: undefined
+              steps: undefined,
+              renderMode: 'chat' as RenderMode
             }
             : msg
         ))
@@ -478,15 +492,22 @@ export function ChatArea() {
           (statusResponse) => {
             const { data, steps: currentStep, status } = statusResponse
 
-            // 判断是否是简单问答（只有 conclusion，没有其他结构化数据）
-            const isSimpleAnswer = status === 'completed' &&
-              data.conclusion &&
-              (!data.time_series_full || data.time_series_full.length === 0) &&
-              (!data.emotion || data.emotion === null) &&
-              (!data.news_list || data.news_list.length === 0)
+            // 🎯 根据后端返回的 intent 决定渲染模式
+            // data.intent: "forecast" | "chat" | "rag" | "news" | "out_of_scope" | "pending"
+            const isForecastIntent = data.intent === 'forecast' ||
+              (data.unified_intent && data.unified_intent.is_forecast)
+
+            // 确定渲染模式
+            let currentRenderMode: RenderMode = 'thinking'
+            if (data.intent && data.intent !== 'pending') {
+              currentRenderMode = isForecastIntent ? 'forecast' : 'chat'
+            }
+
+            // 判断是否是简单问答（非 forecast 意图，只有 conclusion）
+            const isSimpleAnswer = !isForecastIntent && status === 'completed' && data.conclusion
 
             if (isSimpleAnswer) {
-              // 简单问答：只显示文本内容
+              // 简单问答：只显示文本内容，renderMode 为 chat
               setMessages((prev: Message[]) => prev.map((msg: Message) =>
                 msg.id === assistantMessageId
                   ? {
@@ -495,14 +516,15 @@ export function ChatArea() {
                       type: 'text',
                       text: data.conclusion
                     }],
-                    steps: undefined
+                    steps: undefined,
+                    renderMode: 'chat' as RenderMode
                   }
                   : msg
               ))
             } else {
-              // 结构化回答：显示完整分析结果
+              // 预测分析：显示完整分析结果
               // 转换步骤
-              const steps = convertSteps(currentStep, 7, status)
+              const steps = convertSteps(currentStep, data.total_steps || 7, status)
 
               // 转换内容（传入当前步骤和状态，只显示已完成步骤的内容）
               const contents = convertAnalysisToContents(data, currentStep, status)
@@ -513,7 +535,8 @@ export function ChatArea() {
                   ? {
                     ...msg,
                     steps: status === 'completed' ? undefined : steps, // 完成后隐藏步骤
-                    contents: contents.length > 0 ? contents : [] // 清空旧内容，避免显示上次的数据
+                    contents: contents.length > 0 ? contents : [], // 清空旧内容，避免显示上次的数据
+                    renderMode: currentRenderMode // 根据 intent 设置渲染模式
                   }
                   : msg
               ))
