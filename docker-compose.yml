@@ -53,9 +53,7 @@ services:
       - REDIS_PORT=6379
       - REDIS_DB=0
       - TZ=Asia/Shanghai
-      # 外部服务地址
-      - QDRANT_HOST=${QDRANT_HOST:-10.139.197.44}
-      - QDRANT_PORT=${QDRANT_PORT:-6333}
+      # 外部 RAG 服务
       - RAG_SERVICE_URL=${RAG_SERVICE_URL}
       - HF_ENDPOINT=https://hf-mirror.com
       - HF_TOKEN=${HF_TOKEN}

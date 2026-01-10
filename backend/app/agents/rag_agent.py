@@ -4,7 +4,7 @@ RAG Agent 模块
 
 基于研报知识库的检索增强生成 Agent
 
-使用外部 RAG 服务 (http://10.139.197.44:8000)
+使用外部 RAG 服务 (通过 RAG_SERVICE_URL 环境变量配置)
 """
 
 from typing import Dict, Any, List, Optional, Generator

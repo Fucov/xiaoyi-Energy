@@ -78,16 +78,38 @@ export function MessageContent({ content }: MessageContentProps) {
               </td>
             ),
             // 链接
-            a: ({ href, children }) => (
-              <a 
-                href={href} 
-                target="_blank" 
-                rel="noopener noreferrer"
-                className="text-violet-400 hover:text-violet-300 underline"
-              >
-                {children}
-              </a>
-            ),
+            a: ({ href, children }) => {
+              // 处理 rag:// 协议（研报链接）
+              if (href?.startsWith('rag://')) {
+                // 解析 rag://文件名.pdf#page=页码 格式
+                const match = href.match(/^rag:\/\/(.+?)(?:#page=(\d+))?$/)
+                const filename = match?.[1] || href.replace('rag://', '')
+                const page = match?.[2] || '1'
+                return (
+                  <span
+                    className="text-violet-400 hover:text-violet-300 cursor-pointer underline"
+                    title={`研报: ${filename} 第${page}页`}
+                    onClick={() => {
+                      // TODO: 可以打开研报预览弹窗
+                      alert(`研报来源: ${filename}\n页码: ${page}`)
+                    }}
+                  >
+                    {children}
+                  </span>
+                )
+              }
+              // 普通链接
+              return (
+                <a
+                  href={href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-violet-400 hover:text-violet-300 underline"
+                >
+                  {children}
+                </a>
+              )
+            },
             // 引用
             blockquote: ({ children }) => (
               <blockquote className="border-l-4 border-violet-500/50 pl-4 py-2 my-2 bg-dark-700/30 italic text-gray-300">
