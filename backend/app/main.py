@@ -13,26 +13,31 @@ async def check_external_services():
     """
     检查外部服务连接状态
 
-    - RAG 服务 (股票匹配 + 研报检索)
+    - RAG 服务 (研报检索)
+    - Stock Matcher (AkShare)
     """
-    # 检查 RAG 服务 (Stock Matcher 也使用同一个 RAG 服务)
+    # 检查 RAG 服务 (研报检索)
     try:
         rag_client = get_rag_client()
         health = await rag_client.health()
         if health.get("status") == "healthy":
             doc_count = health.get('total_documents', 0)
             print(f"[Startup] RAG 服务连接正常，文档数量: {doc_count}")
-
-            # Stock Matcher 使用同一个 RAG 服务
-            stock_matcher = get_stock_matcher()
-            if stock_matcher.ensure_collection_exists():
-                print(f"[Startup] Stock Matcher 使用 RAG 服务: {stock_matcher.rag_service_url}")
-            else:
-                print("[Startup] Stock Matcher RAG 服务检查失败")
         else:
             print(f"[Startup] RAG 服务状态: {health.get('status', 'unknown')}")
     except Exception as e:
         print(f"[Startup] RAG 服务连接失败: {e}")
+
+    # 检查 Stock Matcher (使用 AkShare)
+    try:
+        stock_matcher = get_stock_matcher()
+        if stock_matcher.ensure_collection_exists():
+            count = stock_matcher.get_stock_count()
+            print(f"[Startup] Stock Matcher 正常，股票数量: {count}")
+        else:
+            print("[Startup] Stock Matcher 加载股票列表失败")
+    except Exception as e:
+        print(f"[Startup] Stock Matcher 初始化失败: {e}")
 
 
 @asynccontextmanager
