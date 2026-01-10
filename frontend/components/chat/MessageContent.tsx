@@ -114,10 +114,16 @@ export function MessageContent({ content }: MessageContentProps) {
     const { title, headers, rows } = content
 
     // 解析 markdown 链接格式 [text](url)
+    // 使用更健壮的解析方式，处理标题中含有 [ 或 ] 的情况
     const parseMarkdownLink = (text: string): { text: string; url?: string } => {
-      const match = text.match(/^\[(.+?)\]\((.+?)\)$/)
-      if (match) {
-        return { text: match[1], url: match[2] }
+      // 查找最后一个 ]( 来分割标题和URL
+      const lastBracket = text.lastIndexOf('](')
+      if (text.startsWith('[') && lastBracket > 0 && text.endsWith(')')) {
+        const title = text.slice(1, lastBracket)
+        const url = text.slice(lastBracket + 2, -1)
+        if (url && url.startsWith('http')) {
+          return { text: title, url }
+        }
       }
       return { text }
     }

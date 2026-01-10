@@ -4,14 +4,11 @@ RAG Service Client
 HTTP client for calling the external RAG (Research Reports) service.
 """
 
-import os
 import httpx
-from typing import Optional, List, Dict, Any
+from typing import Optional, List
 from pydantic import BaseModel
 
-
-# Service URL from environment or default
-RAG_SERVICE_URL = os.getenv("RAG_SERVICE_URL", "http://10.139.197.44:8000")
+from app.core.config import settings
 
 
 class SearchFilters(BaseModel):
@@ -54,8 +51,10 @@ class RAGClient:
     HTTP client for RAG microservice.
     """
 
-    def __init__(self, base_url: str = RAG_SERVICE_URL):
-        self.base_url = base_url.rstrip("/")
+    def __init__(self, base_url: str = ""):
+        # 使用传入的 URL 或从环境变量读取
+        url = base_url or settings.RAG_SERVICE_URL
+        self.base_url = url.rstrip("/") if url else ""
         self.timeout = 60.0  # seconds (RAG can be slow)
 
     async def search(

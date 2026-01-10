@@ -525,7 +525,7 @@ class UnifiedTaskProcessorV3:
                 news_items.append(NewsItem(
                     title=row.get("新闻标题", ""),
                     content=row.get("新闻内容", "")[:300] if row.get("新闻内容") else "",
-                    url=row.get("新闻链接", ""),  # AkShare stock_news_em 返回新闻链接字段
+                    url=str(row.get("新闻链接", "")),
                     published_date=str(row.get("发布时间", "")),
                     source_type="domain_info"
                 ))
@@ -536,7 +536,7 @@ class UnifiedTaskProcessorV3:
                 title=item.get("title", ""),
                 content=item.get("content", "")[:300],
                 url=item.get("url", ""),
-                published_date=item.get("published_date", ""),
+                published_date=item.get("published_date") or "-",  # Tavily 通常不返回日期
                 source_type="search"
             ))
 

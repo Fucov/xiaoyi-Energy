@@ -56,7 +56,7 @@ services:
       # 外部服务地址
       - QDRANT_HOST=${QDRANT_HOST:-10.139.197.44}
       - QDRANT_PORT=${QDRANT_PORT:-6333}
-      - RAG_SERVICE_URL=${RAG_SERVICE_URL:-http://10.139.197.44:8000}
+      - RAG_SERVICE_URL=${RAG_SERVICE_URL}
       - HF_ENDPOINT=https://hf-mirror.com
       - HF_TOKEN=${HF_TOKEN}
     volumes:
