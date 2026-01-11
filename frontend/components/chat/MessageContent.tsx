@@ -3,9 +3,12 @@
 import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts'
+import { LineChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine } from 'recharts'
 import { RotateCcw, Move } from 'lucide-react'
 import type { TextContent, ChartContent, TableContent } from './ChatArea'
+import { useBacktestSimulation } from '@/hooks/useBacktestSimulation'
+import { BacktestControls } from './BacktestControls'
+import type { TimeSeriesPoint } from '@/lib/api/analysis'
 
 interface MessageContentProps {
   content: TextContent | ChartContent | TableContent
@@ -234,10 +237,46 @@ export function MessageContent({ content }: MessageContentProps) {
 
 // 交互式图表组件，支持鼠标拖拽平移和滚轮缩放
 function InteractiveChart({ content }: { content: ChartContent }) {
-  const { title, data, chartType = 'line' } = content
-  
+  const { title, data, chartType = 'line', sessionId, messageId, originalData } = content
+
+  // 回测功能hook
+  const backtest = useBacktestSimulation({
+    sessionId: sessionId || '',
+    messageId: messageId || '',
+    originalData: originalData || []
+  })
+
+  const hasBacktestSupport = Boolean(sessionId && messageId && originalData && originalData.length >= 60)
+
   // 转换数据格式为 Recharts 格式
   const chartData = useMemo(() => {
+    // 如果在回测模式，使用回测数据
+    if (backtest.chartData) {
+      const { history, groundTruth, prediction } = backtest.chartData
+
+      // 合并所有数据点
+      const allDates = new Set<string>()
+      history.forEach(p => allDates.add(p.date))
+      groundTruth.forEach(p => allDates.add(p.date))
+      prediction.forEach(p => allDates.add(p.date))
+
+      const sortedDates = Array.from(allDates).sort()
+
+      return sortedDates.map(date => {
+        const histPoint = history.find(p => p.date === date)
+        const truthPoint = groundTruth.find(p => p.date === date)
+        const predPoint = prediction.find(p => p.date === date)
+
+        return {
+          name: date,
+          历史价格: histPoint?.value ?? null,
+          实际值: truthPoint?.value ?? null,
+          回测预测: predPoint?.value ?? null
+        }
+      })
+    }
+
+    // 正常模式
     return data.labels.map((label, index) => {
       const item: Record<string, string | number | null> = { name: label }
       data.datasets.forEach((dataset) => {
@@ -245,7 +284,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       })
       return item
     })
-  }, [data])
+  }, [data, backtest.chartData])
 
   // 计算Y轴范围（自适应）- 基于所有数据，保持一致性
   const yAxisDomain = useMemo(() => {
@@ -266,22 +305,22 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
     const minValue = Math.min(...allValues)
     const maxValue = Math.max(...allValues)
-    
+
     // 如果所有值相同，添加一些范围
     if (minValue === maxValue) {
       const padding = Math.abs(minValue) * 0.1 || 10
       return [minValue - padding, maxValue + padding]
     }
-    
+
     // 计算范围，留出10%的边距
     const range = maxValue - minValue
     const padding = range * 0.1
-    
+
     // 确保最小值不为负数（如果所有值都为正）
-    const adjustedMin = minValue >= 0 
+    const adjustedMin = minValue >= 0
       ? Math.max(0, minValue - padding)
       : minValue - padding
-    
+
     const adjustedMax = maxValue + padding
 
     // 确保返回的是数字数组，保留合理精度
@@ -293,12 +332,12 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // 状态管理：视图范围（显示的数据索引范围）
   const [viewStartIndex, setViewStartIndex] = useState(0)
   const [viewEndIndex, setViewEndIndex] = useState(() => chartData.length - 1)
-  
+
   // 拖拽状态
   const [isDragging, setIsDragging] = useState(false)
   const [dragStartX, setDragStartX] = useState(0)
   const [dragStartIndex, setDragStartIndex] = useState(0)
-  
+
   // 图表容器引用
   const chartContainerRef = useRef<HTMLDivElement>(null)
 
@@ -329,18 +368,18 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     const deltaX = dragStartX - e.clientX // 反转方向：向左拖拽显示更早的数据
     const dataRange = viewEndIndex - viewStartIndex + 1
     const pixelsPerDataPoint = containerWidth / dataRange
-    
+
     // 计算应该移动的数据点数量
     const dataPointsToMove = Math.round(deltaX / pixelsPerDataPoint)
     const newStartIndex = dragStartIndex + dataPointsToMove
-    
+
     // 限制在有效范围内
     const minStart = 0
     const maxStart = Math.max(0, chartData.length - dataRange)
-    
+
     const clampedStart = Math.max(minStart, Math.min(maxStart, newStartIndex))
     const clampedEnd = clampedStart + dataRange - 1
-    
+
     if (clampedStart !== viewStartIndex || clampedEnd !== viewEndIndex) {
       setViewStartIndex(clampedStart)
       setViewEndIndex(clampedEnd)
@@ -355,45 +394,45 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // 滚轮缩放处理函数
   const handleWheel = useCallback((e: WheelEvent) => {
     if (!chartContainerRef.current) return
-    
+
     const container = chartContainerRef.current
     const rect = container.getBoundingClientRect()
     const mouseX = e.clientX - rect.left
     const mouseY = e.clientY - rect.top
-    
+
     // 检查鼠标是否在图表容器内
     if (mouseX < 0 || mouseX > rect.width || mouseY < 0 || mouseY > rect.height) {
       return
     }
-    
+
     // 阻止默认滚动行为
     e.preventDefault()
     e.stopPropagation()
-    
+
     const containerWidth = rect.width
-    
+
     // 计算鼠标位置对应的数据点索引（相对于当前视图）
     const currentRange = viewEndIndex - viewStartIndex + 1
     const mousePositionRatio = mouseX / containerWidth
     const focusIndex = Math.round(viewStartIndex + mousePositionRatio * currentRange)
-    
+
     // 缩放因子（向上滚动放大，向下滚动缩小）
     const zoomFactor = e.deltaY > 0 ? 1.15 : 0.85
     const newRange = Math.round(currentRange * zoomFactor)
-    
+
     // 限制缩放范围
     const minRange = 5 // 最少显示5个数据点
     const maxRange = chartData.length // 最多显示全部数据
-    
+
     const clampedRange = Math.max(minRange, Math.min(maxRange, newRange))
-    
+
     // 以鼠标位置为中心进行缩放
     const newStartIndex = Math.max(0, Math.min(
       chartData.length - clampedRange,
       Math.round(focusIndex - mousePositionRatio * clampedRange)
     ))
     const newEndIndex = newStartIndex + clampedRange - 1
-    
+
     setViewStartIndex(newStartIndex)
     setViewEndIndex(newEndIndex)
   }, [viewStartIndex, viewEndIndex, chartData.length])
@@ -411,7 +450,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
     // 使用 { passive: false } 确保可以调用 preventDefault
     container.addEventListener('wheel', handleWheel, { passive: false })
-    
+
     return () => {
       container.removeEventListener('wheel', handleWheel)
     }
@@ -440,6 +479,17 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
   return (
     <div className="mt-2">
+      {/* 回测控制UI */}
+      {hasBacktestSupport && (
+        <BacktestControls
+          originalData={originalData || []}
+          splitDate={backtest.splitDate}
+          isLoading={backtest.isLoading}
+          mae={backtest.metrics?.mae ?? null}
+          onSplitChange={backtest.triggerBacktest}
+          onReset={backtest.resetBacktest}
+        />
+      )}
       <div className="flex items-center justify-between mb-3">
         {shouldShowTitle && (
           <h4 className="text-sm font-medium text-gray-300">{title}</h4>
@@ -469,30 +519,30 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           )}
         </div>
       </div>
-      <div 
+      <div
         ref={chartContainerRef}
         className="w-full h-64 relative"
         onMouseDown={handleMouseDown}
-        style={{ 
+        style={{
           cursor: isDragging ? 'grabbing' : 'grab',
           userSelect: 'none'
         }}
       >
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart 
+          <LineChart
             data={displayData}
             margin={{ top: 5, right: 10, left: 0, bottom: 20 }}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4a" />
-            <XAxis 
-              dataKey="name" 
+            <XAxis
+              dataKey="name"
               stroke="#6b7280"
               style={{ fontSize: '12px' }}
               angle={isZoomed ? -45 : 0}
               textAnchor={isZoomed ? "end" : "middle"}
               height={isZoomed ? 60 : 30}
             />
-            <YAxis 
+            <YAxis
               stroke="#6b7280"
               style={{ fontSize: '12px' }}
               domain={yAxisDomain}
@@ -502,7 +552,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                 if (isNaN(value) || !isFinite(value)) {
                   return ''
                 }
-                
+
                 // 如果数值很大，使用科学计数法或简化显示
                 if (Math.abs(value) >= 100000000) {
                   return (value / 100000000).toFixed(1) + '亿'
@@ -526,27 +576,69 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               }}
               labelStyle={{ color: '#9ca3af' }}
             />
-            <Legend 
+            <Legend
               wrapperStyle={{ fontSize: '12px' }}
             />
-            {data.datasets.map((dataset, index) => (
-              <Line
-                key={dataset.label}
-                type="monotone"
-                dataKey={dataset.label}
-                stroke={dataset.color || colors[index % colors.length]}
-                strokeWidth={2}
-                dot={{ r: 3 }}
-                activeDot={{ r: 5 }}
-                connectNulls={false}
-              />
-            ))}
+            {/* 回测模式：3条线 */}
+            {backtest.chartData ? (
+              <>
+                <Line
+                  type="monotone"
+                  dataKey="历史价格"
+                  stroke="#a855f7"
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                  name="历史价格"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="实际值"
+                  stroke="#6b7280"
+                  strokeWidth={2}
+                  strokeDasharray="5 5"
+                  dot={{ r: 2 }}
+                  activeDot={{ r: 4 }}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                  name="实际值 (Ground Truth)"
+                />
+                <Line
+                  type="monotone"
+                  dataKey="回测预测"
+                  stroke="#06b6d4"
+                  strokeWidth={2.5}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                  name="回测预测"
+                />
+              </>
+            ) : (
+              /* 正常模式：原有数据集 */
+              data.datasets.map((dataset, index) => (
+                <Line
+                  key={dataset.label}
+                  type="monotone"
+                  dataKey={dataset.label}
+                  stroke={dataset.color || colors[index % colors.length]}
+                  strokeWidth={2}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls={false}
+                  isAnimationActive={false}
+                />
+              ))
+            )}
           </LineChart>
         </ResponsiveContainer>
       </div>
       {isZoomed && (
         <div className="mt-2 text-xs text-gray-500 text-center">
-          当前视图：{chartData[viewStartIndex]?.name} 至 {chartData[viewEndIndex]?.name} 
+          当前视图：{chartData[viewStartIndex]?.name} 至 {chartData[viewEndIndex]?.name}
           ({viewEndIndex - viewStartIndex + 1} / {chartData.length} 个数据点)
         </div>
       )}
