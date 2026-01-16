@@ -1,17 +1,14 @@
 """
-统一任务处理器 V3
-==================
+统一任务处理器
+==============
 
-基于新的统一架构:
-1. 统一意图识别 (UnifiedIntent)
-2. 股票 RAG 匹配 (当 stock_mention 非空时)
-3. 并行数据获取
-4. 新闻 RAG 服务 (语义去重)
-5. Session/Message 分离管理
-
-架构:
-- Session: 存储对话历史，用于 LLM 上下文
-- Message: 存储单轮分析结果，用于前端展示
+核心架构:
+- 统一意图识别 (UnifiedIntent)
+- 股票 RAG 匹配 (当 stock_mention 非空时)
+- 并行数据获取 (股票数据 + 新闻 + 研报)
+- Session/Message 分离管理
+  - Session: 存储对话历史，用于 LLM 上下文
+  - Message: 存储单轮分析结果，用于前端展示
 """
 
 import asyncio
@@ -46,7 +43,7 @@ from app.agents import (
 )
 
 # Data & Models
-from app.data import DataFetcher
+from app.data import DataFetcher, format_datetime, extract_domain
 from app.data.fetcher import DataFetchError
 from app.models import (
     TimeSeriesAnalyzer,
@@ -57,9 +54,9 @@ from app.models import (
 )
 
 
-class UnifiedTaskProcessorV3:
+class UnifiedTaskProcessor:
     """
-    统一任务处理器 V3
+    统一任务处理器
 
     核心流程:
     1. 意图识别 (一次 LLM 调用返回所有信息)
@@ -175,12 +172,12 @@ class UnifiedTaskProcessorV3:
 
             # === 阶段 3+: 根据意图执行 ===
             if intent.is_forecast:
-                await self._execute_forecast_v3(
+                await self._execute_forecast(
                     message, session, user_input, intent, stock_match_result,
                     resolved_keywords, conversation_history
                 )
             else:
-                await self._execute_chat_v3(
+                await self._execute_chat(
                     message, session, user_input, intent, stock_match_result,
                     resolved_keywords, conversation_history
                 )
@@ -280,12 +277,12 @@ class UnifiedTaskProcessorV3:
 
             # === 阶段 3+: 根据意图执行 ===
             if intent.is_forecast:
-                await self._execute_forecast_v3(
+                await self._execute_forecast(
                     message, session, user_input, intent, stock_match_result,
                     resolved_keywords, conversation_history
                 )
             else:
-                await self._execute_chat_v3(
+                await self._execute_chat(
                     message, session, user_input, intent, stock_match_result,
                     resolved_keywords, conversation_history
                 )
@@ -306,7 +303,7 @@ class UnifiedTaskProcessorV3:
 
     # ========== 预测流程 ==========
 
-    async def _execute_forecast_v3(
+    async def _execute_forecast(
         self,
         message: Message,
         session: Session,
@@ -317,7 +314,7 @@ class UnifiedTaskProcessorV3:
         conversation_history: List[dict]
     ):
         """
-        执行预测流程 (V3)
+        执行预测流程
 
         阶段:
         1. 准备阶段 (意图+股票验证) - 已完成
@@ -339,7 +336,7 @@ class UnifiedTaskProcessorV3:
 
         # 并行获取数据
         stock_data_task = self._fetch_stock_data(stock_code, start_date, end_date)
-        news_task = self._fetch_news_combined(stock_code, stock_name, keywords)
+        news_task = self._fetch_news_combined(stock_code, stock_name, keywords, intent.history_days)
         rag_task = self._fetch_rag_reports(keywords.rag_keywords) if intent.enable_rag else asyncio.sleep(0)
 
         results = await asyncio.gather(
@@ -477,30 +474,30 @@ class UnifiedTaskProcessorV3:
 
     async def _fetch_stock_data(self, stock_code: str, start_date: str, end_date: str):
         """获取股票历史数据，遇到错误时抛出 DataFetchError"""
-        data_config = {
-            "api_function": "stock_zh_a_hist",
-            "params": {
-                "symbol": stock_code,
-                "start_date": start_date,
-                "end_date": end_date,
-                "adjust": "qfq"
-            }
-        }
-
-        raw_df = await asyncio.to_thread(DataFetcher.fetch, data_config)
-        df = await asyncio.to_thread(DataFetcher.prepare, raw_df, data_config)
+        raw_df = await asyncio.to_thread(
+            DataFetcher.fetch_stock_data,
+            stock_code, start_date, end_date
+        )
+        df = await asyncio.to_thread(DataFetcher.prepare, raw_df)
         return df
 
     async def _fetch_news_combined(
         self,
         stock_code: str,
         stock_name: str,
-        keywords: ResolvedKeywords
+        keywords: ResolvedKeywords,
+        history_days: int = 30
     ) -> tuple:
         """
         获取合并新闻 (AkShare + Tavily)
 
         简化版：各取前5条，共10条新闻
+
+        Args:
+            stock_code: 股票代码
+            stock_name: 股票名称
+            keywords: 解析后的关键词
+            history_days: 历史数据天数，新闻搜索范围与此保持一致
 
         Returns:
             (news_items, sentiment_data)
@@ -509,6 +506,10 @@ class UnifiedTaskProcessorV3:
         tavily_results = {"results": [], "count": 0}
         news_df = None
 
+        # 计算新闻搜索的时间范围（与历史数据保持一致）
+        news_end_date = datetime.now().strftime("%Y-%m-%d")
+        news_start_date = (datetime.now() - timedelta(days=history_days)).strftime("%Y-%m-%d")
+
         # AkShare 新闻 (取前5条)
         try:
             news_df = await asyncio.to_thread(DataFetcher.fetch_news, stock_code, 20)
@@ -516,16 +517,18 @@ class UnifiedTaskProcessorV3:
             print(f"[News] AkShare 获取失败: {e}")
 
         # Tavily 新闻 (取前5条)
+        # 使用精确时间范围搜索，配合 CN_FINANCE_DOMAINS 白名单获取相关中文新闻
         try:
             from app.data import TavilyNewsClient
             tavily_client = TavilyNewsClient(settings.tavily_api_key)
-            search_query = " ".join(keywords.search_keywords[:3]) if keywords.search_keywords else stock_name
             tavily_results = await asyncio.to_thread(
                 tavily_client.search_stock_news,
-                stock_name=search_query,
-                days=30,
+                stock_name=stock_name,  # 直接使用股票名称
+                start_date=news_start_date,
+                end_date=news_end_date,
                 max_results=5  # 只取5条
             )
+            print(f"[News] Tavily 搜索时间范围: {news_start_date} ~ {news_end_date}")
         except Exception as e:
             print(f"[News] Tavily 获取失败: {e}")
 
@@ -536,18 +539,21 @@ class UnifiedTaskProcessorV3:
                     title=row.get("新闻标题", ""),
                     content=row.get("新闻内容", "")[:300] if row.get("新闻内容") else "",
                     url=str(row.get("新闻链接", "")),
-                    published_date=str(row.get("发布时间", "")),
-                    source_type="domain_info"
+                    published_date=format_datetime(str(row.get("发布时间", ""))),
+                    source_type="domain_info",
+                    source_name=str(row.get("文章来源", ""))  # AKShare 直接提供来源
                 ))
 
         # 转换 Tavily 新闻 (前5条)
         for item in tavily_results.get("results", [])[:5]:  # 只取5条
+            url = item.get("url", "")
             news_items.append(NewsItem(
                 title=item.get("title", ""),
                 content=item.get("content", "")[:300],
-                url=item.get("url", ""),
-                published_date=item.get("published_date") or "-",  # Tavily 通常不返回日期
-                source_type="search"
+                url=url,
+                published_date=format_datetime(item.get("published_date") or ""),
+                source_type="search",
+                source_name=extract_domain(url)  # 从 URL 提取域名
             ))
 
         print(f"[News] 获取新闻: AkShare {min(5, len(news_df) if news_df is not None else 0)} 条, Tavily {len(tavily_results.get('results', [])[:5])} 条")
@@ -614,7 +620,10 @@ class UnifiedTaskProcessorV3:
             news_text = ""
             for i, item in enumerate(news_items, 1):
                 content_preview = item.content[:200] if item.content else ""
-                news_text += f"{i}. 标题: {item.title}\n   内容: {content_preview}\n\n"
+                news_text += f"{i}. 标题: {item.title}\n"
+                news_text += f"   内容: {content_preview}\n"
+                news_text += f"   URL: {item.url}\n"
+                news_text += f"   当前来源: {item.source_name}\n\n"
 
             prompt = f"""你是一个金融新闻编辑。请对以下 {len(news_items)} 条新闻进行总结：
 
@@ -623,13 +632,14 @@ class UnifiedTaskProcessorV3:
 要求:
 1. 为每条新闻生成一个简洁的摘要标题 (不超过25字)
 2. 为每条新闻生成一个简短的内容摘要 (不超过60字)
-3. 保持客观中立，去除标题党成分
-4. 突出与股票/金融相关的关键信息
+3. 根据 URL 识别新闻来源的中文名称（如 eastmoney.com → 东方财富，sina.com.cn → 新浪财经，cls.cn → 财联社，10jqka.com.cn → 同花顺）。如果"当前来源"已经是有意义的中文名称，可以直接使用。
+4. 保持客观中立，去除标题党成分
+5. 突出与股票/金融相关的关键信息
 
 请严格按照以下 JSON 数组格式输出，不要输出任何其他内容:
 [
-  {{"index": 1, "summarized_title": "...", "summarized_content": "..."}},
-  {{"index": 2, "summarized_title": "...", "summarized_content": "..."}},
+  {{"index": 1, "summarized_title": "...", "summarized_content": "...", "source_name": "东方财富"}},
+  {{"index": 2, "summarized_title": "...", "summarized_content": "...", "source_name": "新浪财经"}},
   ...
 ]"""
 
@@ -657,13 +667,16 @@ class UnifiedTaskProcessorV3:
                 # 找到对应的总结
                 summary = next((s for s in summaries if s.get("index") == i + 1), None)
                 if summary:
+                    # 优先使用 LLM 识别的来源，降级到原始 source_name
+                    source_name = summary.get("source_name") or item.source_name
                     result.append(SummarizedNewsItem(
                         summarized_title=summary.get("summarized_title", item.title[:50]),
                         summarized_content=summary.get("summarized_content", item.content[:100] if item.content else ""),
                         original_title=item.title,
                         url=item.url,
                         published_date=item.published_date,
-                        source_type=item.source_type
+                        source_type=item.source_type,
+                        source_name=source_name
                     ))
                 else:
                     # 降级：使用原标题
@@ -673,7 +686,8 @@ class UnifiedTaskProcessorV3:
                         original_title=item.title,
                         url=item.url,
                         published_date=item.published_date,
-                        source_type=item.source_type
+                        source_type=item.source_type,
+                        source_name=item.source_name
                     ))
 
             print(f"[News] LLM 批量总结完成: {len(result)} 条")
@@ -689,7 +703,8 @@ class UnifiedTaskProcessorV3:
                     original_title=n.title,
                     url=n.url,
                     published_date=n.published_date,
-                    source_type=n.source_type
+                    source_type=n.source_type,
+                    source_name=n.source_name
                 )
                 for n in news_items
             ]
@@ -771,7 +786,7 @@ class UnifiedTaskProcessorV3:
 
     # ========== 非预测流程 ==========
 
-    async def _execute_chat_v3(
+    async def _execute_chat(
         self,
         message: Message,
         session: Session,
@@ -782,7 +797,7 @@ class UnifiedTaskProcessorV3:
         conversation_history: List[dict]
     ):
         """
-        执行非预测流程 (V3)
+        执行非预测流程
 
         根据工具开关并行获取数据，生成带引用的 Markdown 回答
         """
@@ -800,9 +815,9 @@ class UnifiedTaskProcessorV3:
             tasks.append(self._fetch_rag_reports(keywords.rag_keywords))
             task_names.append("rag")
 
-        # 网络搜索
+        # 网络搜索（使用与历史数据相同的时间范围）
         if intent.enable_search:
-            tasks.append(self._search_web(keywords.search_keywords))
+            tasks.append(self._search_web(keywords.search_keywords, intent.history_days))
             task_names.append("search")
 
         # 领域信息
@@ -867,8 +882,14 @@ class UnifiedTaskProcessorV3:
 
         message.update_step_detail(step_num, "completed", "回答完成")
 
-    async def _search_web(self, keywords: List[str]) -> List[dict]:
-        """网络搜索"""
+    async def _search_web(self, keywords: List[str], history_days: int = 30) -> List[dict]:
+        """
+        网络搜索
+
+        Args:
+            keywords: 搜索关键词列表
+            history_days: 搜索时间范围（天数），与历史数据保持一致
+        """
         if not keywords:
             return []
 
@@ -876,12 +897,19 @@ class UnifiedTaskProcessorV3:
             from app.data import TavilyNewsClient
             tavily_client = TavilyNewsClient(settings.tavily_api_key)
             query = " ".join(keywords[:3])
+
+            # 计算时间范围
+            search_end_date = datetime.now().strftime("%Y-%m-%d")
+            search_start_date = (datetime.now() - timedelta(days=history_days)).strftime("%Y-%m-%d")
+
             result = await asyncio.to_thread(
                 tavily_client.search,
                 query=query,
-                days=30,
+                start_date=search_start_date,
+                end_date=search_end_date,
                 max_results=10
             )
+            print(f"[Search] 网络搜索时间范围: {search_start_date} ~ {search_end_date}")
             return result.get("results", [])
         except Exception as e:
             print(f"[Search] 搜索失败: {e}")
@@ -918,12 +946,12 @@ class UnifiedTaskProcessorV3:
 
 
 # 单例获取
-_task_processor: Optional[UnifiedTaskProcessorV3] = None
+_task_processor: Optional[UnifiedTaskProcessor] = None
 
 
-def get_task_processor(api_key: str) -> UnifiedTaskProcessorV3:
+def get_task_processor(api_key: str) -> UnifiedTaskProcessor:
     """获取任务处理器单例"""
     global _task_processor
     if _task_processor is None:
-        _task_processor = UnifiedTaskProcessorV3(api_key)
+        _task_processor = UnifiedTaskProcessor(api_key)
     return _task_processor

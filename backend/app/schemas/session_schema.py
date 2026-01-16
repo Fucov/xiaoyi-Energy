@@ -57,21 +57,15 @@ class RAGSource(BaseModel):
     score: float = 0.0     # 相关度分数
 
 
-class WebSource(BaseModel):
-    """网页来源"""
-    title: str
-    url: str
-    source_type: str       # "search" | "domain_info"
-
-
 class SummarizedNewsItem(BaseModel):
     """LLM 总结后的新闻条目"""
     summarized_title: str       # LLM 总结的标题
     summarized_content: str     # LLM 总结的摘要
     original_title: str         # 原标题
     url: str                    # 来源链接
-    published_date: str
+    published_date: str         # 格式化后的时间，如 "01-16 14:00"
     source_type: str            # "search" | "domain_info"
+    source_name: str = ""       # 来源名称，如 "东方财富"、"新浪财经"
 
 
 class ReportItem(BaseModel):
@@ -174,15 +168,10 @@ class MessageData(BaseModel):
     # 意图识别
     intent: str = "pending"  # forecast/rag/news/chat/out_of_scope
     unified_intent: Optional[UnifiedIntent] = None
-    is_forecast: bool = False
 
     # 股票匹配
     stock_match: Optional[StockMatchResult] = None
-    stock_code: Optional[str] = None
     resolved_keywords: Optional[ResolvedKeywords] = None
-
-    # 模型配置
-    model_name: str = "prophet"
 
     # 时序数据 (仅预测)
     time_series_original: List[TimeSeriesPoint] = Field(default_factory=list)
@@ -217,7 +206,6 @@ class SessionData(BaseModel):
 
     # 全局配置
     context: str = ""
-    model_name: str = "prophet"
 
     # 消息管理
     message_ids: List[str] = Field(default_factory=list)
@@ -255,14 +243,9 @@ class NewsItem(BaseModel):
     title: str
     content: str
     url: str
-    published_date: str
+    published_date: str     # 格式化后的时间，如 "01-16 14:00"
     source_type: str        # "search" | "domain_info"
+    source_name: str = ""   # 来源名称，如 "东方财富"、"新浪财经"
     score: float = 0.0
 
 
-class NewsSummaryResult(BaseModel):
-    """新闻总结结果"""
-    summary_text: str
-    news_items: List[SummarizedNewsItem]
-    total_before_dedup: int
-    total_after_dedup: int

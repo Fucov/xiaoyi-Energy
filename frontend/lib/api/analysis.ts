@@ -32,8 +32,9 @@ export interface NewsItem {
   summarized_content: string
   original_title: string
   url: string
-  published_date: string
-  source_type: string
+  published_date: string    // 格式化后的时间，如 "01-16 14:00"
+  source_type: string       // "search" | "domain_info"
+  source_name: string       // 来源名称，如 "东方财富"、"sina.com.cn"
 }
 
 export interface ReportItem {
@@ -80,7 +81,6 @@ export interface MessageData {
   // 意图识别
   intent: string  // "forecast" | "chat" | "rag" | "news" | "out_of_scope" | "pending"
   unified_intent: UnifiedIntent | null
-  is_forecast: boolean
 
   time_series_original: TimeSeriesPoint[]
   time_series_full: TimeSeriesPoint[]
@@ -97,9 +97,6 @@ export interface MessageData {
   created_at: string
   updated_at: string
   error_message: string | null
-
-  stock_code: string | null
-  model_name: string
 }
 
 // 兼容旧版类型别名

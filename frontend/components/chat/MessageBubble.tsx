@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { cn } from '@/lib/utils'
-import { Copy, ThumbsUp, ThumbsDown, RotateCcw, ChevronDown, ChevronRight, Brain, TrendingUp, TrendingDown, Minus } from 'lucide-react'
+import { Copy, ThumbsUp, ThumbsDown, RotateCcw, ChevronDown, ChevronRight, Brain } from 'lucide-react'
 import type { Message, IntentInfo, RenderMode } from './ChatArea'
 import { MessageContent } from './MessageContent'
 import { StepProgress } from './StepProgress'
@@ -12,127 +12,71 @@ interface MessageBubbleProps {
   message: Message
 }
 
-// 情绪仪表盘组件
+// 情绪横向标尺组件
 function EmotionGauge({ emotion, description }: { emotion: number; description: string }) {
-  // 将情绪值从 [-1, 1] 映射到角度 [180, 0]（从左侧到右侧）
-  const angle = 180 - (emotion + 1) * 90 // -1 -> 180度, 0 -> 90度, 1 -> 0度
-  const rotation = angle
-  
-  const getEmotionColor = (score: number) => {
+  // 将情绪值从 [-1, 1] 映射到百分比 [0%, 100%]
+  const position = ((emotion + 1) / 2) * 100
+
+  const getPointerColor = (score: number) => {
+    if (score > 0.3) return 'bg-green-400'
+    if (score < -0.3) return 'bg-red-400'
+    return 'bg-gray-400'
+  }
+
+  const getTextColor = (score: number) => {
     if (score > 0.3) return 'text-green-400'
     if (score < -0.3) return 'text-red-400'
     return 'text-gray-400'
   }
 
-  const getEmotionIcon = (score: number) => {
-    if (score > 0.3) return <TrendingUp className="w-5 h-5" />
-    if (score < -0.3) return <TrendingDown className="w-5 h-5" />
-    return <Minus className="w-5 h-5" />
-  }
-
   return (
     <div className="space-y-3">
-      {/* 仪表盘容器 */}
-      <div className="relative w-full" style={{ height: '120px' }}>
-        <svg 
-          className="w-full h-full" 
-          viewBox="0 0 240 120" 
-          preserveAspectRatio="xMidYMid meet"
+      {/* 横向标尺 */}
+      <div className="relative pt-8 pb-6">
+        {/* 数值显示 - 跟随指针 */}
+        <div
+          className="absolute top-0 transform -translate-x-1/2 transition-all duration-1000 ease-out"
+          style={{ left: `${position}%` }}
         >
-          <defs>
-            {/* 红色渐变（看跌） */}
-            <linearGradient id="gaugeRed" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#ef4444" />
-              <stop offset="50%" stopColor="#f87171" />
-              <stop offset="100%" stopColor="#fca5a5" />
-            </linearGradient>
-            {/* 绿色渐变（看涨） */}
-            <linearGradient id="gaugeGreen" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#10b981" />
-              <stop offset="50%" stopColor="#34d399" />
-              <stop offset="100%" stopColor="#6ee7b7" />
-            </linearGradient>
-            {/* 中性灰色渐变 */}
-            <linearGradient id="gaugeNeutral" x1="0%" y1="0%" x2="100%" y2="0%">
-              <stop offset="0%" stopColor="#6b7280" />
-              <stop offset="100%" stopColor="#9ca3af" />
-            </linearGradient>
-          </defs>
-
-          {/* 背景轨道（完整半圆） */}
-          <path 
-            d="M 30 100 A 90 90 0 0 1 210 100" 
-            fill="none" 
-            stroke="#2a2a38" 
-            strokeWidth="16" 
-            strokeLinecap="round"
-          />
-          
-          {/* 左侧红色区域（看跌：180度到90度） */}
-          <path 
-            d="M 30 100 A 90 90 0 0 1 120 20" 
-            fill="none" 
-            stroke="url(#gaugeRed)" 
-            strokeWidth="16" 
-            strokeLinecap="round"
-            opacity="0.6"
-          />
-          
-          {/* 右侧绿色区域（看涨：90度到0度） */}
-          <path 
-            d="M 120 20 A 90 90 0 0 1 210 100" 
-            fill="none" 
-            stroke="url(#gaugeGreen)" 
-            strokeWidth="16" 
-            strokeLinecap="round"
-            opacity="0.6"
-          />
-
-          {/* 指针 */}
-          <g transform={`rotate(${rotation} 120 100)`}>
-            <line 
-              x1="120" 
-              y1="100" 
-              x2="120" 
-              y2="30" 
-              stroke="#e5e7eb" 
-              strokeWidth="3" 
-              strokeLinecap="round"
-              className="transition-transform duration-1000 ease-out"
-            />
-            <circle 
-              cx="120" 
-              cy="100" 
-              r="6" 
-              fill="#e5e7eb"
-              className="transition-transform duration-1000 ease-out"
-            />
-          </g>
-        </svg>
-
-        {/* 标签文字 - 与仪表盘对齐 */}
-        <div className="absolute" style={{ top: '8px', left: '8px' }}>
-          <span className="text-xs font-semibold text-red-400">极度看跌</span>
-        </div>
-        <div className="absolute" style={{ top: '8px', right: '8px' }}>
-          <span className="text-xs font-semibold text-green-400">极度看涨</span>
-        </div>
-      </div>
-
-      {/* 情绪值显示 */}
-      <div className="text-center space-y-2">
-        <div className={`flex items-center justify-center gap-2 ${getEmotionColor(emotion)}`}>
-          {getEmotionIcon(emotion)}
-          <span className="text-xl font-bold tracking-tight">
-            {emotion > 0 ? '+' : ''}{emotion.toFixed(2)}
+          <span className={`text-lg font-bold ${getTextColor(emotion)}`}>
+            {emotion.toFixed(2)}
           </span>
         </div>
-        {description && (
-          <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
-            <p className="text-xs text-gray-300 leading-relaxed">{description}</p>
+
+        {/* 渐变轨道 */}
+        <div className="relative h-2 rounded-full overflow-hidden bg-dark-500">
+          <div className="absolute inset-0 flex">
+            {/* 红色区域（看跌） */}
+            <div className="flex-1 bg-gradient-to-r from-red-500 to-red-300 opacity-60" />
+            {/* 灰色区域（中性） */}
+            <div className="flex-1 bg-gradient-to-r from-gray-500 to-gray-400 opacity-60" />
+            {/* 绿色区域（看涨） */}
+            <div className="flex-1 bg-gradient-to-r from-green-300 to-green-500 opacity-60" />
           </div>
-        )}
+        </div>
+
+        {/* 指针 */}
+        <div
+          className={`absolute w-3 h-3 rounded-full shadow-lg transform -translate-x-1/2 transition-all duration-1000 ease-out ${getPointerColor(emotion)}`}
+          style={{ left: `${position}%`, top: '26px' }}
+        />
+
+        {/* 刻度标签 */}
+        <div className="flex justify-between mt-3 px-0">
+          <span className="text-[10px] font-medium text-red-400">-1</span>
+          <span className="text-[10px] text-gray-500">-0.5</span>
+          <span className="text-[10px] text-gray-400">0</span>
+          <span className="text-[10px] text-gray-500">+0.5</span>
+          <span className="text-[10px] font-medium text-green-400">+1</span>
+        </div>
       </div>
+
+      {/* LLM 生成的描述 */}
+      {description && (
+        <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
+          <p className="text-xs text-gray-300 leading-relaxed">{description}</p>
+        </div>
+      )}
     </div>
   )
 }

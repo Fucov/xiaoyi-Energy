@@ -408,11 +408,11 @@ export function ChatArea() {
       contents.push({
         type: 'table',
         title: '', // 标题由外层MessageBubble显示"相关新闻"，这里不重复显示
-        headers: ['标题', '来源', '日期'],
+        headers: ['标题', '来源', '时间'],
         rows: data.news_list.slice(0, 10).map((news) => [
           // 如果有 URL，使用 markdown 链接格式 [标题](url)；否则只显示标题
           news.url ? `[${news.summarized_title}](${news.url})` : news.summarized_title,
-          news.source_type === 'search' ? '网络搜索' : '领域资讯',
+          news.source_name || (news.source_type === 'search' ? '网络' : '资讯'),
           news.published_date
         ])
       })

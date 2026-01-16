@@ -87,8 +87,7 @@ async def create_analysis_task(
     else:
         # 创建新 session
         session = Session.create(
-            context=request.context,
-            model_name=request.model
+            context=request.context
         )
 
     # 为本次查询创建新 Message
@@ -303,8 +302,7 @@ async def stream_analysis(
         session = Session(request.session_id)
     else:
         session = Session.create(
-            context=request.context,
-            model_name=request.model
+            context=request.context
         )
 
     # 创建 Message
