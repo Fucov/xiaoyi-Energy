@@ -37,28 +37,9 @@ class TavilyNewsClient:
         end_date: Optional[str] = None,    # 格式: YYYY-MM-DD
         days: Optional[int] = None,        # 保留向后兼容，当 start_date/end_date 未指定时使用
         max_results: int = 10,
-        search_depth: str = "basic",  # "basic" 或 "advanced"
+        search_depth: str = "advanced",  # "basic" 或 "advanced"
         include_domains: Optional[List[str]] = None,
     ) -> Dict:
-        """
-        搜索新闻
-
-        Args:
-            query: 搜索关键词
-            start_date: 搜索开始日期（格式 YYYY-MM-DD），返回此日期之后的结果
-            end_date: 搜索结束日期（格式 YYYY-MM-DD），返回此日期之前的结果
-            days: 搜索过去多少天的新闻，当 start_date/end_date 未指定时使用（Tavily 支持最多 365 天）
-            max_results: 返回结果数量
-            search_depth: 搜索深度
-            include_domains: 限制搜索域名（可选）
-
-        Returns:
-            {
-                "results": [...],
-                "query": str,
-                "count": int
-            }
-        """
         # 构建搜索参数
         search_params = {
             "query": query,
@@ -69,9 +50,9 @@ class TavilyNewsClient:
 
         # 时间过滤：优先使用 start_date/end_date，其次降级到 days
         if start_date:
-            search_params["start_published_date"] = start_date
+            search_params["start_date"] = start_date
         if end_date:
-            search_params["end_published_date"] = end_date
+            search_params["end_date"] = end_date
 
         # 如果没有指定精确日期范围，则使用 days 参数
         if not start_date and not end_date and days:
@@ -84,15 +65,16 @@ class TavilyNewsClient:
         try:
             response = self.client.search(**search_params)
 
-            results = []
-            for item in response.get("results", []):
-                results.append({
+            results = [
+                {
                     "title": item.get("title", ""),
                     "url": item.get("url", ""),
                     "content": item.get("content", ""),
                     "published_date": item.get("published_date", ""),
                     "score": item.get("score", 0),
-                })
+                }
+                for item in response.get("results", [])
+            ]
 
             return {
                 "results": results,
@@ -112,16 +94,6 @@ class TavilyNewsClient:
         days: int = 30,                    # 保留作为 fallback，当 start_date/end_date 未指定时使用
         max_results: int = 10,
     ) -> Dict:
-        """
-        搜索股票相关新闻
-
-        Args:
-            stock_name: 股票名称，如 "茅台"、"比亚迪"
-            start_date: 搜索开始日期（格式 YYYY-MM-DD），返回此日期之后的结果
-            end_date: 搜索结束日期（格式 YYYY-MM-DD），返回此日期之前的结果
-            days: 搜索天数（当 start_date/end_date 未指定时使用）
-            max_results: 结果数量
-        """
         # 构建搜索查询
         query = f"{stock_name} 股票"
 
@@ -135,24 +107,3 @@ class TavilyNewsClient:
             search_depth="advanced",
             include_domains=CN_FINANCE_DOMAINS,
         )
-
-    def format_results_for_llm(self, results: Dict) -> str:
-        """
-        将搜索结果格式化为 LLM 可读的文本
-        """
-        if not results.get("results"):
-            return "未找到相关新闻。"
-
-        formatted = f"搜索「{results['query']}」找到 {results['count']} 条新闻：\n\n"
-
-        for i, item in enumerate(results["results"], 1):
-            formatted += f"{i}. **{item['title']}**\n"
-            if item.get("published_date"):
-                formatted += f"   发布时间: {item['published_date']}\n"
-            if item.get("content"):
-                # 截取摘要
-                content = item["content"][:200] + "..." if len(item["content"]) > 200 else item["content"]
-                formatted += f"   摘要: {content}\n"
-            formatted += f"   来源: {item['url']}\n\n"
-
-        return formatted

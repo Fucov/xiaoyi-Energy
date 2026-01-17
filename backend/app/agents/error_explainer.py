@@ -5,14 +5,8 @@ Error Explainer Agent 模块
 负责将技术错误转换为用户友好的解释
 """
 
-from typing import Dict, Any
 from openai import OpenAI
-import sys
-import os
-
-# 添加父目录到路径以导入 DataFetchError
-sys.path.append(os.path.dirname(os.path.dirname(__file__)))
-from data.fetcher import DataFetchError
+from app.data.fetcher import DataFetchError
 
 
 class ErrorExplainerAgent:

@@ -17,8 +17,8 @@ from enum import Enum
 
 # ========== 枚举类型 ==========
 
-class SessionStatus(str, Enum):
-    """会话状态"""
+class MessageStatus(str, Enum):
+    """消息状态"""
     PENDING = "pending"
     PROCESSING = "processing"
     COMPLETED = "completed"
@@ -81,6 +81,14 @@ class StepDetail(BaseModel):
     name: str
     status: StepStatus = StepStatus.PENDING
     message: str = ""
+
+
+class ThinkingLogEntry(BaseModel):
+    """思考日志条目 - 记录每个 LLM 调用的原始输出"""
+    step_id: str                    # 步骤 ID，如 "intent", "sentiment", "report"
+    step_name: str                  # 步骤名称，如 "意图识别", "情感分析", "报告生成"
+    content: str                    # LLM 原始输出内容
+    timestamp: str                  # ISO 格式时间戳
 
 
 # ========== 意图识别相关 ==========
@@ -160,7 +168,7 @@ class MessageData(BaseModel):
     user_query: str = ""
 
     # 状态
-    status: SessionStatus = SessionStatus.PENDING
+    status: MessageStatus = MessageStatus.PENDING
     steps: int = 0
     total_steps: int = 0
     step_details: List[StepDetail] = Field(default_factory=list)
@@ -192,6 +200,9 @@ class MessageData(BaseModel):
     conclusion: str = ""
     error_message: Optional[str] = None
 
+    # 思考日志 (累积显示所有 LLM 调用的原始输出)
+    thinking_logs: List[ThinkingLogEntry] = Field(default_factory=list)
+
 
 class SessionData(BaseModel):
     """
@@ -206,6 +217,7 @@ class SessionData(BaseModel):
 
     # 全局配置
     context: str = ""
+    model_name: Optional[str] = Field(default=None, description="使用的预测模型名称")
 
     # 消息管理
     message_ids: List[str] = Field(default_factory=list)
@@ -230,7 +242,7 @@ class AnalysisStatusResponse(BaseModel):
     """分析状态响应"""
     session_id: str
     message_id: str
-    status: SessionStatus
+    status: MessageStatus
     steps: int
     total_steps: int = 0
     data: MessageData

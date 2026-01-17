@@ -12,6 +12,7 @@
 """
 
 import asyncio
+import traceback
 from datetime import datetime, timedelta
 from typing import Optional, List
 
@@ -30,17 +31,20 @@ from app.schemas.session_schema import (
 
 # Services
 from app.services.stock_matcher import get_stock_matcher
-# NewsRAGService 暂时不使用，直接用 LLM 批量总结
-# from app.services.news_rag_service import create_news_rag_service
+from app.services.rag_client import check_rag_availability
 
 # Agents
 from app.agents import (
     IntentAgent,
-    RAGAgent,
     ReportAgent,
     ErrorExplainerAgent,
     SentimentAgent,
+    NewsSummaryAgent,
 )
+
+# Data clients
+from app.data import TavilyNewsClient
+from app.data.rag_searcher import RAGSearcher
 
 # Data & Models
 from app.data import DataFetcher, format_datetime, extract_domain
@@ -69,10 +73,11 @@ class UnifiedTaskProcessor:
     def __init__(self, api_key: str):
         self.api_key = api_key
         self.intent_agent = IntentAgent(api_key)
-        self.rag_agent = RAGAgent(api_key)
+        self.rag_searcher = RAGSearcher()
         self.report_agent = ReportAgent(api_key)
         self.error_explainer = ErrorExplainerAgent(api_key)
         self.sentiment_agent = SentimentAgent(api_key)
+        self.news_summary_agent = NewsSummaryAgent(api_key)
         self.stock_matcher = get_stock_matcher()
 
     async def execute(
@@ -115,6 +120,10 @@ class UnifiedTaskProcessor:
 
             # 保存意图
             message.save_unified_intent(intent)
+
+            # 保存意图识别的思考日志
+            intent_thinking = f"判断结果:\n- 范围内: {intent.is_in_scope}\n- 预测任务: {intent.is_forecast}\n- 股票提及: {intent.stock_mention}\n- 启用RAG: {intent.enable_rag}\n- 启用搜索: {intent.enable_search}\n- 原因: {intent.reason}"
+            message.append_thinking_log("intent", "意图识别", intent_thinking)
 
             # 检查是否超出范围
             if not intent.is_in_scope:
@@ -191,7 +200,6 @@ class UnifiedTaskProcessor:
                 session.add_conversation_message("assistant", data.conclusion)
 
         except Exception as e:
-            import traceback
             print(f"❌ Task execution error: {traceback.format_exc()}")
             message.mark_error(str(e))
             raise
@@ -296,7 +304,6 @@ class UnifiedTaskProcessor:
                 session.add_conversation_message("assistant", data.conclusion)
 
         except Exception as e:
-            import traceback
             print(f"❌ execute_after_intent error: {traceback.format_exc()}")
             message.mark_error(str(e))
             raise
@@ -327,60 +334,82 @@ class UnifiedTaskProcessor:
         stock_code = stock_info.stock_code if stock_info else ""
         stock_name = stock_info.stock_name if stock_info else user_input
 
-        # === 阶段 2: 数据获取 (并行) ===
+        # === 阶段 2: 数据获取 (并行，但股票数据优先保存) ===
         message.update_step_detail(3, "running", "获取历史数据和新闻...")
 
         # 设置日期范围
         end_date = datetime.now().strftime("%Y%m%d")
         start_date = (datetime.now() - timedelta(days=intent.history_days)).strftime("%Y%m%d")
 
-        # 并行获取数据
-        stock_data_task = self._fetch_stock_data(stock_code, start_date, end_date)
-        news_task = self._fetch_news_combined(stock_code, stock_name, keywords, intent.history_days)
-        rag_task = self._fetch_rag_reports(keywords.rag_keywords) if intent.enable_rag else asyncio.sleep(0)
+        # 创建并行任务
+        stock_data_task = asyncio.create_task(self._fetch_stock_data(stock_code, start_date, end_date))
+        news_task = asyncio.create_task(self._fetch_news_combined(stock_code, stock_name, keywords, intent.history_days))
+        # 检查 RAG 可用性，不可用时跳过（避免等待超时）
+        rag_available = await check_rag_availability() if intent.enable_rag else False
+        rag_task = asyncio.create_task(self._fetch_rag_reports(keywords.rag_keywords)) if intent.enable_rag and rag_available else None
 
-        results = await asyncio.gather(
-            stock_data_task,
-            news_task,
-            rag_task,
-            return_exceptions=True
-        )
+        # 优先等待股票数据，获取后立即保存（让前端尽快显示图表）
+        try:
+            stock_result = await stock_data_task
+        except Exception as e:
+            stock_result = e
 
         # 处理股票数据获取结果
         df = None
-        if isinstance(results[0], DataFetchError):
+        if isinstance(stock_result, DataFetchError):
             # 使用 ErrorExplainerAgent 生成友好的错误解释
             error_explanation = await asyncio.to_thread(
                 self.error_explainer.explain_data_fetch_error,
-                results[0],
+                stock_result,
                 user_input
             )
             message.save_conclusion(error_explanation)
             message.update_step_detail(3, "error", "数据获取失败")
+            # 取消其他任务
+            news_task.cancel()
+            if rag_task:
+                rag_task.cancel()
             return
-        elif isinstance(results[0], Exception):
-            message.save_conclusion(f"获取数据时发生错误: {str(results[0])}")
+        elif isinstance(stock_result, Exception):
+            message.save_conclusion(f"获取数据时发生错误: {str(stock_result)}")
             message.update_step_detail(3, "error", "数据获取失败")
+            news_task.cancel()
+            if rag_task:
+                rag_task.cancel()
             return
         else:
-            df = results[0]
-
-        news_result = results[1] if not isinstance(results[1], Exception) else ([], {})
-        rag_sources = results[2] if not isinstance(results[2], Exception) and intent.enable_rag else []
+            df = stock_result
 
         if df is None or df.empty:
             message.save_conclusion(f"无法获取 {stock_name} 的历史数据，请检查股票代码是否正确。")
             message.update_step_detail(3, "error", "数据获取失败")
+            news_task.cancel()
+            if rag_task:
+                rag_task.cancel()
             return
 
-        # 保存数据
+        # 🚀 立即保存股票数据，前端可以先显示历史价格图表
         original_points = self._df_to_points(df, is_prediction=False)
         message.save_time_series_original(original_points)
+        print(f"[UnifiedTask] 股票数据已保存 ({len(df)} 天)，等待新闻获取...")
+
+        # 等待新闻和 RAG 任务完成
+        pending_tasks = [news_task]
+        if rag_task:
+            pending_tasks.append(rag_task)
+
+        other_results = await asyncio.gather(*pending_tasks, return_exceptions=True)
+
+        news_result = other_results[0] if not isinstance(other_results[0], Exception) else ([], {})
+        rag_sources = other_results[1] if len(other_results) > 1 and not isinstance(other_results[1], Exception) and intent.enable_rag else []
 
         news_items, sentiment_result = news_result
         # 使用 LLM 总结新闻标题
         if news_items:
-            summarized_news = await self._summarize_news_items(session.session_id, news_items)
+            summarized_news, news_summary_raw = await self._summarize_news_items(session.session_id, news_items)
+            # 保存新闻总结的思考日志
+            if news_summary_raw:
+                message.append_thinking_log("news_summary", "新闻总结", news_summary_raw)
         else:
             summarized_news = []
         message.save_news(summarized_news)
@@ -407,6 +436,7 @@ class UnifiedTaskProcessor:
         emotion_result = analysis_results[1] if not isinstance(analysis_results[1], Exception) else {}
 
         # 保存情绪
+        print(f"[Emotion Debug] emotion_result: {emotion_result}")
         if emotion_result:
             # 从 raw 中获取 LLM 生成的描述
             raw = emotion_result.get("raw", {})
@@ -416,15 +446,26 @@ class UnifiedTaskProcessor:
                 # 从 formatted_text 提取纯文本（去除 markdown 格式）
                 formatted = raw.get("formatted_text", "")
                 if "**分析说明:**" in formatted:
-                    llm_description = formatted.split("**分析说明:**")[-1].strip()[:100]
+                    llm_description = formatted.split("**分析说明:**")[-1].strip()
                 else:
-                    llm_description = formatted[:100]
+                    llm_description = formatted
             description = llm_description or emotion_result.get("description", "中性")
+            # 确保 description 不为空字符串
+            if not description or not description.strip():
+                description = "中性"
 
-            message.save_emotion(
-                emotion_result.get("score", 0),
-                description
-            )
+            score = emotion_result.get("score", 0)
+            print(f"[Emotion Debug] Saving emotion: score={score}, description={description}")
+            message.save_emotion(score, description)
+
+            # 保存情感分析的思考日志
+            raw_response = emotion_result.get("raw", {}).get("raw_response", "")
+            if raw_response:
+                message.append_thinking_log("sentiment", "情感分析", raw_response)
+        else:
+            # emotion_result 为空时，保存默认值确保前端能显示
+            print("[Emotion Debug] emotion_result is empty, saving default emotion")
+            message.save_emotion(0, "中性")
 
         message.update_step_detail(
             4, "completed",
@@ -473,7 +514,7 @@ class UnifiedTaskProcessor:
         # === 阶段 5: 报告生成 ===
         message.update_step_detail(6, "running", "生成分析报告...")
 
-        report = await asyncio.to_thread(
+        report_result = await asyncio.to_thread(
             self.report_agent.generate,
             user_input,
             features,
@@ -481,7 +522,14 @@ class UnifiedTaskProcessor:
             emotion_result or {},  # 使用分析后的情绪结果，包含 score 和 description
             conversation_history
         )
-        message.save_conclusion(report)
+
+        # 处理报告生成结果（现在返回字典）
+        report_content = report_result.get("content", str(report_result)) if isinstance(report_result, dict) else report_result
+        message.save_conclusion(report_content)
+
+        # 保存报告生成的思考日志
+        if isinstance(report_result, dict) and report_result.get("raw_response"):
+            message.append_thinking_log("report", "报告生成", report_result["raw_response"])
 
         message.update_step_detail(6, "completed", "报告生成完成")
 
@@ -532,7 +580,6 @@ class UnifiedTaskProcessor:
         # Tavily 新闻 (取前5条)
         # 使用精确时间范围搜索，配合 CN_FINANCE_DOMAINS 白名单获取相关中文新闻
         try:
-            from app.data import TavilyNewsClient
             tavily_client = TavilyNewsClient(settings.tavily_api_key)
             tavily_results = await asyncio.to_thread(
                 tavily_client.search_stock_news,
@@ -560,11 +607,13 @@ class UnifiedTaskProcessor:
         # 转换 Tavily 新闻 (前5条)
         for item in tavily_results.get("results", [])[:5]:  # 只取5条
             url = item.get("url", "")
+            # Tavily API 不返回日期，使用客户端从 URL 提取的日期
+            pub_date = item.get("published_date") or ""
             news_items.append(NewsItem(
                 title=item.get("title", ""),
                 content=item.get("content", "")[:300],
                 url=url,
-                published_date=format_datetime(item.get("published_date") or ""),
+                published_date=format_datetime(pub_date) if pub_date else "-",
                 source_type="search",
                 source_name=extract_domain(url)  # 从 URL 提取域名
             ))
@@ -588,7 +637,7 @@ class UnifiedTaskProcessor:
         try:
             query = " ".join(keywords[:3])
             docs = await asyncio.to_thread(
-                self.rag_agent.search_reports,
+                self.rag_searcher.search_reports,
                 query,
                 5
             )
@@ -610,117 +659,21 @@ class UnifiedTaskProcessor:
         self,
         _session_id: str,  # 暂时不使用，保留接口兼容
         news_items: List[NewsItem]
-    ) -> List[SummarizedNewsItem]:
+    ) -> tuple:
         """
-        使用 LLM 批量总结新闻标题
+        使用 NewsSummaryAgent 批量总结新闻标题
 
-        简化版：不使用 NewsRAGService，直接用一次 LLM 调用批量总结
+        Returns:
+            (summarized_news_list, raw_llm_response)
         """
         if not news_items:
-            return []
+            return [], ""
 
-        try:
-            from openai import AsyncOpenAI
-            import json
-
-            # 创建 LLM 客户端 (使用 DeepSeek)
-            llm_client = AsyncOpenAI(
-                api_key=self.api_key,
-                base_url="https://api.deepseek.com"
-            )
-
-            # 构建批量总结 prompt
-            news_text = ""
-            for i, item in enumerate(news_items, 1):
-                content_preview = item.content[:200] if item.content else ""
-                news_text += f"{i}. 标题: {item.title}\n"
-                news_text += f"   内容: {content_preview}\n"
-                news_text += f"   URL: {item.url}\n"
-                news_text += f"   当前来源: {item.source_name}\n\n"
-
-            prompt = f"""你是一个金融新闻编辑。请对以下 {len(news_items)} 条新闻进行总结：
-
-{news_text}
-
-要求:
-1. 为每条新闻生成一个简洁的摘要标题 (不超过25字)
-2. 为每条新闻生成一个简短的内容摘要 (不超过60字)
-3. 根据 URL 识别新闻来源的中文名称（如 eastmoney.com → 东方财富，sina.com.cn → 新浪财经，cls.cn → 财联社，10jqka.com.cn → 同花顺）。如果"当前来源"已经是有意义的中文名称，可以直接使用。
-4. 保持客观中立，去除标题党成分
-5. 突出与股票/金融相关的关键信息
-
-请严格按照以下 JSON 数组格式输出，不要输出任何其他内容:
-[
-  {{"index": 1, "summarized_title": "...", "summarized_content": "...", "source_name": "东方财富"}},
-  {{"index": 2, "summarized_title": "...", "summarized_content": "...", "source_name": "新浪财经"}},
-  ...
-]"""
-
-            response = await llm_client.chat.completions.create(
-                model="deepseek-chat",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=2000
-            )
-
-            # 解析 LLM 返回的 JSON
-            response_text = response.choices[0].message.content.strip()
-            # 处理可能的 markdown 代码块
-            if response_text.startswith("```"):
-                response_text = response_text.split("```")[1]
-                if response_text.startswith("json"):
-                    response_text = response_text[4:]
-                response_text = response_text.strip()
-
-            summaries = json.loads(response_text)
-
-            # 构建结果
-            result = []
-            for i, item in enumerate(news_items):
-                # 找到对应的总结
-                summary = next((s for s in summaries if s.get("index") == i + 1), None)
-                if summary:
-                    # 优先使用 LLM 识别的来源，降级到原始 source_name
-                    source_name = summary.get("source_name") or item.source_name
-                    result.append(SummarizedNewsItem(
-                        summarized_title=summary.get("summarized_title", item.title[:50]),
-                        summarized_content=summary.get("summarized_content", item.content[:100] if item.content else ""),
-                        original_title=item.title,
-                        url=item.url,
-                        published_date=item.published_date,
-                        source_type=item.source_type,
-                        source_name=source_name
-                    ))
-                else:
-                    # 降级：使用原标题
-                    result.append(SummarizedNewsItem(
-                        summarized_title=item.title[:50] if len(item.title) > 50 else item.title,
-                        summarized_content=item.content[:100] if item.content else "",
-                        original_title=item.title,
-                        url=item.url,
-                        published_date=item.published_date,
-                        source_type=item.source_type,
-                        source_name=item.source_name
-                    ))
-
-            print(f"[News] LLM 批量总结完成: {len(result)} 条")
-            return result
-
-        except Exception as e:
-            print(f"[News] LLM 总结失败，使用原标题: {e}")
-            # 降级：使用原标题
-            return [
-                SummarizedNewsItem(
-                    summarized_title=n.title[:50] if len(n.title) > 50 else n.title,
-                    summarized_content=n.content[:100] if n.content else "",
-                    original_title=n.title,
-                    url=n.url,
-                    published_date=n.published_date,
-                    source_type=n.source_type,
-                    source_name=n.source_name
-                )
-                for n in news_items
-            ]
+        # 使用 asyncio.to_thread 调用同步 Agent
+        return await asyncio.to_thread(
+            self.news_summary_agent.summarize,
+            news_items
+        )
 
     async def _analyze_sentiment(self, sentiment_data: dict) -> dict:
         """分析情感"""
@@ -823,10 +776,12 @@ class UnifiedTaskProcessor:
         tasks = []
         task_names = []
 
-        # RAG 检索
+        # RAG 检索（先检查可用性，避免等待超时）
         if intent.enable_rag:
-            tasks.append(self._fetch_rag_reports(keywords.rag_keywords))
-            task_names.append("rag")
+            rag_available = await check_rag_availability()
+            if rag_available:
+                tasks.append(self._fetch_rag_reports(keywords.rag_keywords))
+                task_names.append("rag")
 
         # 网络搜索（使用与历史数据相同的时间范围）
         if intent.enable_search:
@@ -907,7 +862,6 @@ class UnifiedTaskProcessor:
             return []
 
         try:
-            from app.data import TavilyNewsClient
             tavily_client = TavilyNewsClient(settings.tavily_api_key)
             query = " ".join(keywords[:3])
 

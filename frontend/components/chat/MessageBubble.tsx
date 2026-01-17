@@ -7,6 +7,7 @@ import type { Message, IntentInfo, RenderMode } from './ChatArea'
 import { MessageContent } from './MessageContent'
 import { StepProgress } from './StepProgress'
 import { ThinkingSection } from './ThinkingSection'
+import { RAGSourceCard } from './RAGSourceCard'
 
 interface MessageBubbleProps {
   message: Message
@@ -55,26 +56,26 @@ function EmotionGauge({ emotion, description }: { emotion: number; description: 
           </div>
         </div>
 
-        {/* 指针 */}
+        {/* 指针 - 居中于轨道 (pt-8=32px, h-2=8px, 中心=36px, 指针h-3=12px, top=36-6=30px) */}
         <div
-          className={`absolute w-3 h-3 rounded-full shadow-lg transform -translate-x-1/2 transition-all duration-1000 ease-out ${getPointerColor(emotion)}`}
-          style={{ left: `${position}%`, top: '26px' }}
+          className={`absolute w-3 h-3 rounded-full shadow-lg transform -translate-x-1/2 -translate-y-1/2 transition-all duration-1000 ease-out ${getPointerColor(emotion)}`}
+          style={{ left: `${position}%`, top: '36px' }}
         />
 
         {/* 刻度标签 */}
         <div className="flex justify-between mt-3 px-0">
-          <span className="text-[10px] font-medium text-red-400">-1</span>
-          <span className="text-[10px] text-gray-500">-0.5</span>
-          <span className="text-[10px] text-gray-400">0</span>
-          <span className="text-[10px] text-gray-500">+0.5</span>
-          <span className="text-[10px] font-medium text-green-400">+1</span>
+          <span className="text-xs font-medium text-red-400">-1</span>
+          <span className="text-xs text-gray-500">-0.5</span>
+          <span className="text-xs text-gray-400">0</span>
+          <span className="text-xs text-gray-500">+0.5</span>
+          <span className="text-xs font-medium text-green-400">+1</span>
         </div>
       </div>
 
       {/* LLM 生成的描述 */}
       {description && (
         <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
-          <p className="text-xs text-gray-300 leading-relaxed">{description}</p>
+          <p className="text-sm text-gray-300 leading-relaxed">{description}</p>
         </div>
       )}
     </div>
@@ -153,11 +154,12 @@ export function MessageBubble({ message }: MessageBubbleProps) {
               <IntentBadge intentInfo={message.intentInfo} />
             )}
 
-            {/* 思考过程 - 在有思考内容时显示（可展开） */}
-            {message.thinkingContent && (
+            {/* 思考过程 - 在有思考内容或思考日志时显示（可展开） */}
+            {(message.thinkingContent || (message.thinkingLogs && message.thinkingLogs.length > 0)) && (
               <ThinkingSection
-                content={message.thinkingContent}
+                content={message.thinkingContent || ''}
                 isLoading={message.renderMode === 'thinking'}
+                logs={message.thinkingLogs}
               />
             )}
 
@@ -204,15 +206,25 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                   t.type === 'text' && t.text.startsWith('__EMOTION_MARKER__')
                 )
 
-                // 🎯 renderMode === 'chat': 显示简单文本气泡
-                // 判断是否是简单问答：renderMode 为 chat，或者只有文本内容且没有结构化数据
-                const isSimpleAnswer = renderMode === 'chat' || (
-                  !hasSteps &&
-                  charts.length === 0 &&
-                  tables.length === 0 &&
-                  !emotionText &&
-                  texts.length > 0 &&
-                  texts.every(t => !t.text.startsWith('__EMOTION_MARKER__'))
+                // DEBUG: 输出渲染逻辑判断
+                console.log('[MessageBubble Debug]', {
+                  renderMode,
+                  chartsLen: charts.length,
+                  tablesLen: tables.length,
+                  textsLen: texts.length,
+                  hasEmotionText: !!emotionText,
+                  emotionTextContent: emotionText?.text?.substring(0, 50)
+                })
+
+                // 🎯 判断是否是简单问答
+                // 有结构化数据（图表、表格、情绪）时强制使用结构化布局，不管 renderMode 是什么
+                const hasStructuredData = charts.length > 0 || tables.length > 0 || emotionText
+                const isSimpleAnswer = !hasStructuredData && (
+                  renderMode === 'chat' || (
+                    !hasSteps &&
+                    texts.length > 0 &&
+                    texts.every(t => !t.text.startsWith('__EMOTION_MARKER__'))
+                  )
                 )
 
                 // 如果是简单问答，直接显示文本内容，不使用结构化布局
@@ -294,7 +306,8 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                 // 解析情绪数据
                 let emotionData: { score: number; description: string } | null = null
                 if (emotionText && emotionText.type === 'text') {
-                  const match = emotionText.text.match(/__EMOTION_MARKER__([^_]+)__(.*)__/)
+                  // 使用 [\s\S]* 匹配包括换行符在内的任意字符
+                  const match = emotionText.text.match(/__EMOTION_MARKER__([^_]+)__([\s\S]*)__/)
                   if (match) {
                     const score = parseFloat(match[1])
                     const description = match[2] || ''
@@ -309,15 +322,22 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                     "space-y-4",
                     message.isCollapsing && "animate-collapse"
                   )}>
-                    {/* 四个结构化部分 */}
+                    {/* 上半部分：左右分栏 - 市场情绪(1) | 相关新闻+研报(2) */}
                     <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
-                      {/* 市场情绪区域（左侧上方） */}
-                      <div className="glass rounded-2xl p-4 max-w-md">
+                      {/* 左侧：市场情绪 */}
+                      <div className="glass rounded-2xl p-4">
                         <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
                           <span>😊</span> 市场情绪
                         </h3>
                         {emotionData ? (
-                          <EmotionGauge emotion={emotionData.score} description={emotionData.description} />
+                          <div className="space-y-3">
+                            <EmotionGauge emotion={emotionData.score} description="" />
+                            {emotionData.description && (
+                              <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
+                                <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">{emotionData.description}</p>
+                              </div>
+                            )}
+                          </div>
                         ) : (
                           <div className="text-sm text-gray-400 flex items-center gap-2">
                             <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
@@ -326,17 +346,47 @@ export function MessageBubble({ message }: MessageBubbleProps) {
                         )}
                       </div>
 
-                      {/* 相关新闻区域（右侧上方） */}
-                      <div className="glass rounded-2xl p-4">
-                        <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                          <span>📰</span> 相关新闻
-                        </h3>
-                        {newsTable ? (
-                          <MessageContent content={newsTable} />
+                      {/* 右侧：相关新闻 + 研报来源（1:1 高度比例） */}
+                      <div className="grid grid-rows-2 gap-4 min-h-[400px]">
+                        {/* 相关新闻（占 1 份高度） */}
+                        <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
+                          <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
+                            <span>📰</span> 相关新闻
+                          </h3>
+                          <div className="flex-1 overflow-y-auto">
+                            {newsTable ? (
+                              <MessageContent content={newsTable} />
+                            ) : (
+                              <div className="text-sm text-gray-400 flex items-center gap-2">
+                                <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
+                                <span>正在获取新闻...</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* 研报来源（占 2 份高度） */}
+                        {message.ragSources && message.ragSources.length > 0 ? (
+                          <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
+                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
+                              <span>📚</span> 研报来源
+                              <span className="text-xs text-gray-500 font-normal">
+                                ({message.ragSources.length} 篇相关研报)
+                              </span>
+                            </h3>
+                            <div className="flex-1 overflow-y-auto">
+                              <RAGSourceCard sources={message.ragSources} />
+                            </div>
+                          </div>
                         ) : (
-                          <div className="text-sm text-gray-400 flex items-center gap-2">
-                            <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-                            <span>正在获取新闻...</span>
+                          <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
+                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
+                              <span>📚</span> 研报来源
+                            </h3>
+                            <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+                              <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse mr-2" />
+                              <span>正在检索研报...</span>
+                            </div>
                           </div>
                         )}
                       </div>

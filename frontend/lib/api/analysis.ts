@@ -37,16 +37,29 @@ export interface NewsItem {
   source_name: string       // 来源名称，如 "东方财富"、"sina.com.cn"
 }
 
+export interface RAGSource {
+  filename: string        // "茅台2024研报.pdf"
+  page: number           // 页码
+  content_snippet: string // 摘要片段
+  score: number          // 相关度分数 (0-1)
+}
+
 export interface ReportItem {
   title: string
-  summary: string
-  date: string
-  source: string
+  viewpoint: string      // LLM 提取的观点
+  source: RAGSource      // 来源信息
 }
 
 export interface EmotionData {
   score: number  // -1 到 1
   description: string
+}
+
+export interface ThinkingLogEntry {
+  step_id: string        // 步骤 ID，如 "intent", "sentiment", "report"
+  step_name: string      // 步骤名称，如 "意图识别", "情感分析", "报告生成"
+  content: string        // LLM 原始输出内容
+  timestamp: string      // ISO 格式时间戳
 }
 
 export interface UnifiedIntent {
@@ -89,10 +102,14 @@ export interface MessageData {
 
   news_list: NewsItem[]
   report_list: ReportItem[]
+  rag_sources: RAGSource[]  // RAG 研报来源
   emotion: number | null
   emotion_des: string | null
 
   conclusion: string
+
+  // 思考日志 (累积显示所有 LLM 调用的原始输出)
+  thinking_logs: ThinkingLogEntry[]
 
   created_at: string
   updated_at: string

@@ -35,18 +35,30 @@ def format_datetime(dt_str: str) -> str:
 
     Returns:
         格式化后的时间字符串，如 "01-16 14:00"
-        解析失败时返回原字符串或 "-"
+        解析失败时返回 "-"
     """
     if not dt_str or dt_str == "-":
         return "-"
 
     dt_str = str(dt_str).strip()
 
+    # 处理空白字符串、"None"、"null" 等无效值
+    if not dt_str or dt_str.lower() in ("none", "null", "undefined", ""):
+        return "-"
+
     try:
         dt = None
 
-        # 1. ISO 8601 格式 (Tavily 常用)
-        if "T" in dt_str:
+        # 1. RFC 2822 格式 (Tavily 返回): "Sun, 04 Jan 2026 00:16:55 GMT"
+        if "," in dt_str and "GMT" in dt_str:
+            try:
+                from email.utils import parsedate_to_datetime
+                dt = parsedate_to_datetime(dt_str)
+            except Exception:
+                pass
+
+        # 2. ISO 8601 格式
+        if dt is None and "T" in dt_str:
             # 移除毫秒部分
             clean = re.sub(r"\.\d+", "", dt_str)
             try:
@@ -92,17 +104,18 @@ def format_datetime(dt_str: str) -> str:
             else:
                 dt = dt.astimezone(BEIJING_TZ)
 
-            # 如果有小时信息，显示 "MM-DD HH:00"
+            # 显示完整的年月日小时 "YYYY-MM-DD HH:00"
             if dt.hour > 0 or dt.minute > 0:
-                return dt.strftime("%m-%d %H:00")
+                return dt.strftime("%Y-%m-%d %H:00")
             else:
-                # 只有日期，显示 "MM-DD"
-                return dt.strftime("%m-%d")
+                # 只有日期，显示 "YYYY-MM-DD"
+                return dt.strftime("%Y-%m-%d")
 
-        return dt_str if dt_str else "-"
+        # 无法解析时返回 "-"，不返回原字符串（避免显示奇怪的格式）
+        return "-"
 
     except Exception:
-        return dt_str if dt_str else "-"
+        return "-"
 
 
 def extract_domain(url: str) -> str:

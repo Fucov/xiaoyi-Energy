@@ -18,9 +18,10 @@ from app.core.redis_client import get_redis
 from app.schemas.session_schema import (
     SessionData,
     MessageData,
-    SessionStatus,
+    MessageStatus,
     StepStatus,
     StepDetail,
+    ThinkingLogEntry,
     UnifiedIntent,
     ResolvedKeywords,
     StockMatchResult,
@@ -57,7 +58,7 @@ class Message:
             message_id=message_id,
             session_id=session_id,
             user_query=user_query,
-            status=SessionStatus.PENDING,
+            status=MessageStatus.PENDING,
             created_at=now,
             updated_at=now
         )
@@ -145,7 +146,7 @@ class Message:
         data = self.get()
         if data and 0 < step <= len(data.step_details):
             data.steps = step
-            data.status = SessionStatus.PROCESSING
+            data.status = MessageStatus.PROCESSING
             data.step_details[step - 1].status = StepStatus(status)
             data.step_details[step - 1].message = message
             self._save(data)
@@ -211,7 +212,7 @@ class Message:
         """标记为完成"""
         data = self.get()
         if data:
-            data.status = SessionStatus.COMPLETED
+            data.status = MessageStatus.COMPLETED
             data.steps = data.total_steps
             for step in data.step_details:
                 if step.status != StepStatus.ERROR:
@@ -223,10 +224,26 @@ class Message:
         """标记为错误"""
         data = self.get()
         if data:
-            data.status = SessionStatus.ERROR
+            data.status = MessageStatus.ERROR
             data.error_message = error_message
             self._save(data)
             print(f"[Message] Error: {error_message}")
+
+    # ========== 思考日志 ==========
+
+    def append_thinking_log(self, step_id: str, step_name: str, content: str):
+        """追加思考日志条目（累积显示）"""
+        data = self.get()
+        if data:
+            entry = ThinkingLogEntry(
+                step_id=step_id,
+                step_name=step_name,
+                content=content,
+                timestamp=datetime.now().isoformat()
+            )
+            data.thinking_logs.append(entry)
+            self._save(data)
+            print(f"[Message] Thinking log: {step_id} - {len(content)} chars")
 
 
 class Session:
