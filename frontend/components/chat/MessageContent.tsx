@@ -380,7 +380,8 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
   // 图表容器引用
   const chartContainerRef = useRef<HTMLDivElement>(null)
-  const [mouseY, setMouseY] = useState<number | null>(null) // 鼠标实际Y坐标（像素）
+  const [mouseY, setMouseY] = useState<number | null>(null) // 鼠标相对于绘图区域的Y坐标（像素）
+  const [plotAreaBounds, setPlotAreaBounds] = useState<{ top: number; height: number } | null>(null) // 绘图区域边界
 
   // 计算当前显示的数据
   const displayData = useMemo(() => {
@@ -498,16 +499,88 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     }
   }, [handleWheel])
 
-  // 原生鼠标跟踪获取真实Y坐标
+  // 获取绘图区域边界（排除图例和边距）
   useEffect(() => {
     const container = chartContainerRef.current
     if (!container) return
 
+    const updatePlotAreaBounds = () => {
+      // 查找 SVG 元素（Recharts 会在容器内创建 SVG）
+      const svg = container.querySelector('svg')
+      if (!svg) return
+
+      const containerRect = container.getBoundingClientRect()
+      const svgRect = svg.getBoundingClientRect()
+      
+      // 查找 X 轴和 Y 轴的实际位置来确定绘图区域
+      const xAxis = svg.querySelector('.recharts-cartesian-axis.xAxis')
+      const yAxis = svg.querySelector('.recharts-cartesian-axis.yAxis')
+      
+      // 如果找不到坐标轴，使用 margin 计算
+      if (!xAxis || !yAxis) {
+        const marginTop = 5
+        const marginBottom = 20
+        const legend = svg.querySelector('.recharts-legend-wrapper')
+        const legendHeight = legend ? legend.getBoundingClientRect().height : 0
+        
+        const plotTop = marginTop
+        const plotHeight = containerRect.height - marginTop - marginBottom - legendHeight
+        setPlotAreaBounds({ top: plotTop, height: plotHeight })
+        return
+      }
+
+      // 获取坐标轴的实际位置
+      const xAxisRect = xAxis.getBoundingClientRect()
+      const yAxisRect = yAxis.getBoundingClientRect()
+      
+      // 绘图区域从 Y 轴顶部开始，到 X 轴顶部结束
+      // 计算相对于容器顶部的偏移
+      const plotTop = yAxisRect.top - containerRect.top
+      const plotBottom = xAxisRect.top - containerRect.top
+      const plotHeight = plotBottom - plotTop
+      
+      if (plotHeight > 0) {
+        setPlotAreaBounds({ top: plotTop, height: plotHeight })
+      }
+    }
+
+    // 初始化时获取边界
+    const timer = setTimeout(updatePlotAreaBounds, 100)
+    
+    // 监听窗口大小变化
+    window.addEventListener('resize', updatePlotAreaBounds)
+    
+    // 使用 MutationObserver 监听 DOM 变化（图表渲染完成）
+    const observer = new MutationObserver(updatePlotAreaBounds)
+    observer.observe(container, { childList: true, subtree: true })
+
+    return () => {
+      clearTimeout(timer)
+      window.removeEventListener('resize', updatePlotAreaBounds)
+      observer.disconnect()
+    }
+  }, [chartData, viewStartIndex, viewEndIndex, isZoomed])
+
+  // 原生鼠标跟踪获取真实Y坐标（仅在绘图区域内）
+  useEffect(() => {
+    const container = chartContainerRef.current
+    if (!container || !plotAreaBounds) return
+
     const handleMouseMove = (e: MouseEvent) => {
-      const rect = container.getBoundingClientRect()
-      const y = e.clientY - rect.top
-      if (y >= 0 && y <= rect.height) {
-        setMouseY(y)
+      const containerRect = container.getBoundingClientRect()
+      const mouseYRelativeToContainer = e.clientY - containerRect.top
+      
+      // 检查鼠标是否在绘图区域内
+      const plotAreaTop = plotAreaBounds.top
+      const plotAreaBottom = plotAreaTop + plotAreaBounds.height
+      
+      if (mouseYRelativeToContainer >= plotAreaTop && mouseYRelativeToContainer <= plotAreaBottom) {
+        // 计算相对于绘图区域顶部的坐标
+        const yInPlotArea = mouseYRelativeToContainer - plotAreaTop
+        setMouseY(yInPlotArea)
+      } else {
+        // 鼠标不在绘图区域内，不显示虚线
+        setMouseY(null)
       }
     }
 
@@ -520,7 +593,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       container.removeEventListener('mousemove', handleMouseMove)
       container.removeEventListener('mouseleave', handleMouseLeave)
     }
-  }, [])
+  }, [plotAreaBounds])
 
   // 重置视图
   const handleReset = useCallback(() => {
@@ -631,15 +704,12 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               wrapperStyle={{ fontSize: '12px' }}
             />
             {/* 鼠标跟随的水平参考线 */}
-            {mouseY !== null && chartContainerRef.current && (() => {
-              const rect = chartContainerRef.current!.getBoundingClientRect()
-              const chartHeight = rect.height  // 动态获取实际高度
-              const marginTop = 5
-              const marginBottom = 20
-              const effectiveHeight = chartHeight - marginTop - marginBottom
-
-              const adjustedY = mouseY - marginTop
-              const dataValue = yAxisDomain[1] - (adjustedY / effectiveHeight) * (yAxisDomain[1] - yAxisDomain[0])
+            {mouseY !== null && plotAreaBounds && (() => {
+              // mouseY 已经是相对于绘图区域顶部的坐标
+              const effectiveHeight = plotAreaBounds.height
+              
+              // 计算对应的数据值
+              const dataValue = yAxisDomain[1] - (mouseY / effectiveHeight) * (yAxisDomain[1] - yAxisDomain[0])
 
               return (
                 <ReferenceLine
