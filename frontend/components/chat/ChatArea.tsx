@@ -610,6 +610,18 @@ export function ChatArea({ sessionId: externalSessionId }: ChatAreaProps) {
     try {
       // 使用 analysis API - 流式获取思考内容
       const { streamAnalysisTask, pollAnalysisStatus, getAnalysisStatus } = await import('@/lib/api/analysis')
+      const { createSession } = await import('@/lib/api/sessions')
+
+      // 确保 session 存在（后端要求 session_id 必填）
+      let activeSessionId = sessionId
+      if (!activeSessionId) {
+        const newSession = await createSession()
+        activeSessionId = newSession.session_id
+        setSessionId(activeSessionId)
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('chat_session_id', activeSessionId)
+        }
+      }
 
       // 阶段1: 使用 SSE 流式获取思考内容
       const { session_id: currentSessionId, message_id: currentMessageId } = await streamAnalysisTask(

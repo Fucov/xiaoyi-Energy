@@ -224,26 +224,6 @@ async def get_session_history(session_id: str):
     }
 
 
-@router.delete("/{session_id}")
-async def delete_analysis_session(session_id: str):
-    """
-    删除分析会话
-
-    Args:
-        session_id: 会话 ID
-
-    Returns:
-        {"message": "会话已删除"}
-    """
-    if not Session.exists(session_id):
-        raise HTTPException(status_code=404, detail="会话不存在")
-
-    session = Session(session_id)
-    session.delete()
-
-    return {"message": "会话已删除"}
-
-
 @router.post("/suggestions")
 async def get_suggestions(request: SuggestionsRequest):
     """

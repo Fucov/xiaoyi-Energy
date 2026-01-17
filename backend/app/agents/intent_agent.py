@@ -461,7 +461,6 @@ class IntentAgent:
                 model="deepseek-chat",
                 messages=messages,
                 temperature=0.3,
-                max_tokens=800
             )
             return response.choices[0].message.content
 
@@ -471,8 +470,7 @@ class IntentAgent:
             model="deepseek-chat",
             messages=messages,
             temperature=0.3,
-            max_tokens=800,
-            stream=True
+            stream=True,
         )
 
         for chunk in response:

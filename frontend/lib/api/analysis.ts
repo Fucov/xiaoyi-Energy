@@ -131,39 +131,6 @@ export interface AnalysisStatusResponse {
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 /**
- * 创建分析任务
- *
- * @param message 用户问题
- * @param model 预测模型
- * @param context 上下文
- * @param sessionId 会话ID (多轮对话时传入，复用同一会话)
- * @returns { session_id, message_id, status }
- */
-export async function createAnalysisTask(
-  message: string,
-  model: string = 'prophet',
-  context: string = '',
-  sessionId?: string | null
-): Promise<CreateAnalysisResponse> {
-  const response = await fetch(`${API_BASE_URL}/api/analysis/create`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message,
-      model,
-      context,
-      session_id: sessionId || null
-    })
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to create analysis task: ${response.statusText}`)
-  }
-
-  return response.json()
-}
-
-/**
  * 查询任务状态
  *
  * @param sessionId 会话ID
@@ -227,19 +194,6 @@ export async function getSessionHistory(sessionId: string): Promise<SessionHisto
   } catch (error) {
     console.error('获取会话历史失败:', error)
     return null
-  }
-}
-
-/**
- * 删除会话
- */
-export async function deleteAnalysisSession(sessionId: string): Promise<void> {
-  const response = await fetch(`${API_BASE_URL}/api/analysis/${sessionId}`, {
-    method: 'DELETE'
-  })
-
-  if (!response.ok) {
-    throw new Error(`Failed to delete session: ${response.statusText}`)
   }
 }
 

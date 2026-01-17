@@ -83,13 +83,12 @@ class ErrorExplainerAgent:
                 model="deepseek-chat",
                 messages=[
                     {
-                        "role": "system", 
+                        "role": "system",
                         "content": "你是小易，一个专业且友好的金融分析助手。你擅长用简单易懂的方式解释技术问题，并给出实用建议。"
                     },
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
-                max_tokens=600
             )
             
             return response.choices[0].message.content

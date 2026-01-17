@@ -168,7 +168,6 @@ class ReportAgent:
                 model="deepseek-chat",
                 messages=messages,
                 temperature=0.3,
-                max_tokens=1500,
             )
             raw_content = response.choices[0].message.content
             return {

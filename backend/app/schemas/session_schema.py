@@ -233,9 +233,8 @@ class SessionData(BaseModel):
 class CreateAnalysisRequest(BaseModel):
     """创建分析任务请求"""
     message: str = Field(..., description="用户问题")
-    session_id: Optional[str] = Field(default=None, description="会话ID，多轮对话时复用")
+    session_id: str = Field(..., description="会话ID（必填，通过 POST /api/sessions 创建）")
     model: str = Field(default="prophet", description="预测模型")
-    context: str = Field(default="", description="上下文")
     force_intent: Optional[str] = Field(default=None, description="强制指定意图")
 
 

@@ -45,7 +45,6 @@ class NewsSummaryAgent:
                 model="deepseek-chat",
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.3,
-                max_tokens=2000
             )
 
             # 解析 LLM 返回的 JSON
