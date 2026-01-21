@@ -1,10 +1,11 @@
 'use client'
 
+import { Suspense } from 'react'
 import { ChatArea } from '@/components/chat/ChatArea'
 import { Sidebar } from '@/components/sidebar/Sidebar'
 import { useSessionManager } from '@/hooks/useSessionManager'
 
-export default function Home() {
+function HomeContent() {
   const {
     sessions,
     activeSessionId,
@@ -12,6 +13,7 @@ export default function Home() {
     switchSession,
     deleteSession,
     renameSession,
+    refreshSessions,
   } = useSessionManager()
 
   return (
@@ -30,7 +32,25 @@ export default function Home() {
       <ChatArea
         key={activeSessionId || 'new'}
         sessionId={activeSessionId}
+        onSessionCreated={() => {
+          // 只刷新会话列表，不切换会话
+          // 原因：切换会话会导致 key 变化，组件重新挂载，中断正在进行的流
+          // ChatArea 内部已经有正确的 sessionId，会自动更新 URL
+          refreshSessions()
+        }}
       />
     </div>
+  )
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={
+      <div className="flex h-screen gradient-mesh items-center justify-center">
+        <div className="text-white/60">加载中...</div>
+      </div>
+    }>
+      <HomeContent />
+    </Suspense>
   )
 }
