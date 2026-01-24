@@ -283,10 +283,25 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // 异常区悬浮状态
   const [activeZone, setActiveZone] = useState<any>(null)
 
-  // 获取新闻数据
+  // 从URL恢复新闻侧栏状态（仅在ticker可用时）
+  useEffect(() => {
+    if (!ticker) return;
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const savedDate = urlParams.get('selectedDate');
+    const savedSidebarOpen = urlParams.get('sidebarOpen') === 'true';
+
+    if (savedDate) {
+      setSelectedDate(savedDate);
+      setNewsSidebarOpen(savedSidebarOpen);
+      console.log('[MessageContent] Restored from URL - date:', savedDate, 'sidebar:', savedSidebarOpen);
+    }
+  }, [ticker]); // 只在ticker变化时执行
+
+  // 获取新闻数据 - 只要有ticker就自动加载（确保刷新后能恢复）
   useEffect(() => {
     const fetchNews = async () => {
-      if (!newsSidebarOpen || !selectedDate || !ticker) return;
+      if (!selectedDate || !ticker) return;
       setNewsLoading(true);
       try {
         const response = await fetch(`/api/news?ticker=${ticker}&date=${selectedDate}&range=2`);
@@ -301,15 +316,32 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       }
     };
     fetchNews();
-  }, [newsSidebarOpen, selectedDate, ticker]);
+  }, [selectedDate, ticker]);  // 移除newsSidebarOpen依赖，确保刷新后自动加载
 
   // 图表点击处理
   const handleChartClick = useCallback((e: any) => {
     if (e && e.activeLabel && ticker) {
-      setSelectedDate(e.activeLabel as string);
+      const date = e.activeLabel as string;
+      setSelectedDate(date);
       setNewsSidebarOpen(true);
+
+      // 持久化到URL
+      const params = new URLSearchParams(window.location.search);
+      params.set('selectedDate', date);
+      params.set('sidebarOpen', 'true');
+      window.history.replaceState({}, '', `${window.location.pathname}?${params}`);
     }
   }, [ticker]);
+
+  // 新闻侧栏关闭处理
+  const handleCloseSidebar = useCallback(() => {
+    setNewsSidebarOpen(false);
+
+    // 更新URL参数
+    const params = new URLSearchParams(window.location.search);
+    params.set('sidebarOpen', 'false');
+    window.history.replaceState({}, '', `${window.location.pathname}?${params}`);
+  }, []);
 
   // 回测功能hook
   const backtest = useBacktestSimulation({
@@ -1253,7 +1285,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       {ticker && (
         <ChartNewsSidebar
           isOpen={newsSidebarOpen}
-          onClose={() => setNewsSidebarOpen(false)}
+          onClose={handleCloseSidebar}
           news={newsData}
           loading={newsLoading}
           selectedDate={selectedDate}

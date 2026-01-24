@@ -714,6 +714,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       conversational_response?: string
       session_id?: string
       message_id?: string
+      anomaly_zones?: Array<{
+        startDate: string
+        endDate: string
+        summary: string
+        sentiment: 'positive' | 'negative' | 'neutral'
+      }>
+      anomaly_zones_ticker?: string | null
     },
     currentStep: number = 0,
     status: string = 'pending'
@@ -841,7 +848,10 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           // 回测功能字段
           sessionId: data.session_id,
           messageId: data.message_id,
-          originalData: data.time_series_original
+          originalData: data.time_series_original,
+          // 异常区域和股票代码（用于刷新后恢复）
+          anomalyZones: data.anomaly_zones || [],
+          ticker: data.anomaly_zones_ticker ?? undefined
         })
       } else {
         // 步骤2-5：只显示历史价格
@@ -864,7 +874,10 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           // 回测功能字段
           sessionId: data.session_id,
           messageId: data.message_id,
-          originalData: data.time_series_original
+          originalData: data.time_series_original,
+          // 异常区域和股票代码（用于刷新后恢复）
+          anomalyZones: data.anomaly_zones || [],
+          ticker: data.anomaly_zones_ticker ?? undefined
         })
       }
     }

@@ -7,6 +7,7 @@
 """
 
 import asyncio
+import os  # 用于读取环境变量
 import json
 import traceback
 from datetime import datetime, timedelta
@@ -557,9 +558,10 @@ class StreamingTaskProcessor:
 
                     try:
                         mongo_client = get_mongo_client()
-                        news_collection = mongo_client["EastMoneyGubaNews"][
-                            "stock_news"
-                        ]
+                        # 使用环境变量配置数据库和集合名称
+                        db_name = os.getenv("MONGODB_DATABASE", "EastMoneyGubaNews")
+                        collection_name = os.getenv("MONGODB_COLLECTION", "stock_news")
+                        news_collection = mongo_client[db_name][collection_name]
 
                         for zone in anomaly_zones:
                             start = zone["startDate"]
