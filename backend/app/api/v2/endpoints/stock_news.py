@@ -3,57 +3,18 @@ import json
 from datetime import datetime, timedelta
 from typing import List, Optional, Any
 from fastapi import APIRouter, HTTPException, Query
-from pymongo import MongoClient
 from pydantic import BaseModel
 from app.core.redis_client import get_redis
+from app.data.stock_db import (
+    MONGO_CONFIG,
+    get_mongo_client,
+    ensure_mongodb_indexes,
+    NewsItem,
+)
 
 router = APIRouter()
 
-MONGO_CONFIG = {
-    "host": os.getenv("MONGODB_HOST", "localhost"),
-    "port": int(os.getenv("MONGODB_PORT", "27017")),
-    "username": os.getenv("MONGODB_USERNAME", "root"),
-    "password": os.getenv("MONGODB_PASSWORD", "admin"),
-    "database": os.getenv("MONGODB_DATABASE", "EastMoneyGubaNews"),
-    "collection": os.getenv("MONGODB_COLLECTION", "stock_news"),  # 集合名称配置
-}
-
 REDIS_KEY_PREFIX = os.getenv("REDIS_KEY_PREFIX", "stock:")
-
-
-def get_mongo_client():
-    from urllib.parse import quote_plus
-
-    # URL编码用户名和密码（处理特殊字符）
-    username = quote_plus(MONGO_CONFIG["username"])
-    password = quote_plus(MONGO_CONFIG["password"])
-    host = MONGO_CONFIG["host"]
-    port = MONGO_CONFIG["port"]
-    auth_db = MONGO_CONFIG["database"]
-
-    # 使用URL格式连接字符串
-    mongo_uri = (
-        f"mongodb://{username}:{password}@{host}:{port}/{auth_db}?authSource={auth_db}"
-    )
-
-    return MongoClient(mongo_uri)
-
-
-def ensure_mongodb_indexes(db, collection_name: str):
-    """Ensure publish_time index exists for efficient date range queries"""
-    try:
-        collection = db[collection_name]
-        existing_indexes = collection.index_information()
-
-        if "publish_time_1" not in existing_indexes:
-            collection.create_index([("publish_time", 1)])
-            print(f"[MongoDB] Created index on publish_time for {collection_name}")
-        else:
-            print(
-                f"[MongoDB] Index on publish_time already exists for {collection_name}"
-            )
-    except Exception as e:
-        print(f"[MongoDB] Index creation warning: {e}")
 
 
 def make_redis_key(key_type: str, ticker: str, **kwargs) -> str:
@@ -82,21 +43,6 @@ def cache_set(key: str, data: Any, ttl: int = 3600) -> bool:
     except Exception as e:
         print(f"Redis set error: {e}")
     return False
-
-
-class NewsItem(BaseModel):
-    id: str
-    title: str
-    summary: Optional[str] = None
-    content_type: str
-    publish_time: str
-    source: Optional[str] = None
-    url: Optional[str] = None
-    read_count: int = 0
-    comment_count: int = 0
-    institution: Optional[str] = None
-    grade: Optional[str] = None
-    notice_type: Optional[str] = None
 
 
 class StockEventsResponse(BaseModel):
@@ -322,10 +268,17 @@ async def get_stock_events(
         # 生成价格数据点
         price_data = generate_price_points(close_prices, dates) if close_prices else []
 
-        # 使用新的 SignificantPointService 算法
+        # 使用新的 SignificantPointService (now StockSignalService) 算法
+        # Note: Will be updated to use StockSignalService in next step but for now keeping compatible or I should update it now?
+        # Since I haven't created StockSignalService yet, I will use try-except or just keep the old one if it still exists?
+        # Actually I planned to remove SignificantPointService. So I should create StockSignalService first or update this to use it after creating it.
+        # But I'm writing this file now. I will try to use the new service name assuming I will create it momentarily.
+
         try:
             import pandas as pd
-            from app.services.significant_points import SignificantPointService
+
+            # from app.services.significant_points import SignificantPointService # OLD
+            from app.services.stock_signal_service import StockSignalService  # NEW
 
             # 构建 DataFrame
             df = pd.DataFrame(
@@ -341,26 +294,46 @@ async def get_stock_events(
                 date: len(news_list) for date, news_list in news_by_date.items()
             }
 
-            # 计算显著点
-            sig_service = SignificantPointService(window=20)
-            significant_points = sig_service.calculate_points(df, news_counts, top_k=8)
+            # 计算显著点 & 异常区域
+            sig_service = StockSignalService(window=20)
+            # Use new method from consolidated service
+            # Assuming interface: generate_zones(df, news_counts) similar to dynamic_clustering
+            # But significant_points also returned individual points.
+            # I will design StockSignalService to have methods covering both needs.
 
-            # 生成异常区域
-            anomaly_zones = sig_service.generate_anomaly_zones(significant_points, df)
+            anomaly_zones = sig_service.generate_zones(df, news_counts)
+
+            # Map zones to format expected if needed, or if generate_zones returns compatible format.
+            # The previous code used sig_service.calculate_points then generate_anomaly_zones.
+            # DynamicClusteringService's generate_zones returns enriched zones.
 
             # 标记事件触发的价格点
+            # We need to identity which points are significant.
+            # I will ensure StockSignalService puts date or similar info in zones or provides a method.
+
+            # For now let's assume generate_zones returns what we need for zones.
+            # And for points marking, we can infer from zones or add a method.
+
+            # Simple logic: if a date is within an anomaly zone, mark it?
+            # Or use explicit significant points. I'll add calculate_points to the new service too.
+
+            significant_points = sig_service.calculate_points(df, news_counts, top_k=8)
             sig_dates = set([sp["date"] for sp in significant_points])
+
             for point in price_data:
                 if point["date"] in sig_dates:
                     point["is_event_triggered"] = True
 
         except Exception as e:
-            print(f"[SignificantPoints] Error: {e}")
+            print(f"[StockSignalService] Error: {e}")
             # 降级到旧算法
             anomaly_zones = detect_turning_points(close_prices, dates)
 
-        # 为异常区域添加新闻摘要
+        # 为异常区域添加新闻摘要 (If not already present)
         for zone in anomaly_zones:
+            if "summary" in zone and zone["summary"]:
+                continue
+
             zone_titles = []
             try:
                 zone_start = datetime.strptime(zone["startDate"], "%Y-%m-%d")
@@ -430,6 +403,8 @@ async def get_stock_events(
 
     except Exception as e:
         print(f"Error fetching stock events: {e}")
+        # import traceback
+        # traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         if client:

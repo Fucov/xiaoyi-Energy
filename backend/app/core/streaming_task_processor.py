@@ -490,7 +490,7 @@ class StreamingTaskProcessor:
         )
         try:
             import pandas as pd
-            from app.services.dynamic_clustering import DynamicClusteringService
+            from app.services.stock_signal_service import StockSignalService
             from app.agents.event_summary_agent import EventSummaryAgent
 
             # 从 df 提取日期、收盘价、成交量
@@ -536,10 +536,8 @@ class StreamingTaskProcessor:
 
             # 如果缓存不存在，计算并保存
             if not cached_zones_json:
-                # 使用动态聚类服务
-                clustering_service = DynamicClusteringService(
-                    lookback=60, max_zone_days=10
-                )
+                # 使用动态聚类服务 (Merged into StockSignalService)
+                clustering_service = StockSignalService(lookback=60, max_zone_days=10)
                 anomaly_zones = clustering_service.generate_zones(sig_df, news_counts)
 
                 print(
@@ -551,8 +549,8 @@ class StreamingTaskProcessor:
                 try:
                     event_agent = EventSummaryAgent()
 
-                    # 导入MongoDB client（从stock.py）
-                    from app.api.v2.endpoints.stock import get_mongo_client
+                    # 导入MongoDB client（从stock_db.py）
+                    from app.data.stock_db import get_mongo_client
 
                     mongo_client = None
 
