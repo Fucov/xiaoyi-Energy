@@ -130,25 +130,15 @@ class StreamingTaskProcessor:
                 return
 
             # 如果用户通过 API 指定了模型，覆盖意图识别的结果
-            print(f"[ModelSelection] API 传入的 model_name: {model_name}")
-            print(
-                f"[ModelSelection] 意图识别返回的 forecast_model: {intent.forecast_model}"
-            )
+            # print(f"[ModelSelection] API 传入的 model_name: {model_name}")
+            # print(f"[ModelSelection] 意图识别返回的 forecast_model: {intent.forecast_model}")
             if model_name is not None:
                 intent.forecast_model = model_name
-                print(f"[ModelSelection] 使用 API 指定的模型: {model_name}")
+                # print(f"[ModelSelection] 使用 API 指定的模型: {model_name}")
             else:
                 # 如果用户没有通过 API 指定模型，且 LLM 返回的是 "prophet"（可能是默认值），
                 # 则将其设为 None，触发自动模型选择
-                if intent.forecast_model == "prophet":
-                    print(
-                        f"[ModelSelection] 检测到 LLM 返回了 'prophet'，将其设为 None 以触发自动选择"
-                    )
-                    intent.forecast_model = None
-                else:
-                    print(
-                        f"[ModelSelection] LLM 返回的模型不是 'prophet'，保持原值: {intent.forecast_model}"
-                    )
+                intent.forecast_model = None
 
             # 保存意图
             message.save_unified_intent(intent)
@@ -777,18 +767,18 @@ class StreamingTaskProcessor:
         # 计算预测天数
         last_date = df["ds"].max().to_pydatetime()
         target_date_from_start = last_date + timedelta(days=90)
-        print(f"[ModelSelection] 目标日期从开始: {target_date_from_start}")
+        # print(f"[ModelSelection] 目标日期从开始: {target_date_from_start}")
         target_date_to_today = datetime.now()
-        print(f"[ModelSelection] 目标日期到今天: {target_date_to_today}")
+        # print(f"[ModelSelection] 目标日期到今天: {target_date_to_today}")
         target_date = max(target_date_from_start, target_date_to_today)
-        print(f"[ModelSelection] 目标日期: {target_date}")
+        # print(f"[ModelSelection] 目标日期: {target_date}")
         forecast_horizon = max((target_date - last_date).days, 1)
-        print(f"[ModelSelection] 预测天数: {forecast_horizon}")
+        # print(f"[ModelSelection] 预测天数: {forecast_horizon}")
 
         # 模型选择：构建候选模型列表
         candidate_models = ["prophet", "xgboost", "randomforest", "dlinear"]
         user_specified_model = intent.forecast_model
-        print(f"[ModelSelection] 用户指定模型: {user_specified_model}")
+        # print(f"[ModelSelection] 用户指定模型: {user_specified_model}")
 
         # 调用模型选择器
         try:
@@ -801,19 +791,19 @@ class StreamingTaskProcessor:
             model_comparison = selection_result["metrics"]
             is_better_than_baseline = selection_result["is_better_than_baseline"]
 
-            print(f"[ModelSelection] 选择的最佳模型: {best_model}")
-            print(f"[ModelSelection] Baseline: {baseline}")
-            print(f"[ModelSelection] 用户指定模型: {user_specified_model}")
+            # print(f"[ModelSelection] 选择的最佳模型: {best_model}")
+            # print(f"[ModelSelection] Baseline: {baseline}")
+            # print(f"[ModelSelection] 用户指定模型: {user_specified_model}")
 
             # 确定最终使用的模型并生成解释信息
             model_selection_reason = ""
             enable_baseline_penalty = self.ENABLE_BASELINE_PENALTY
 
             if not user_specified_model or user_specified_model == "auto":
-                print(f"[ModelSelection] 进入自动选择分支")
+                # print(f"[ModelSelection] 进入自动选择分支")
                 # 用户未指定模型，使用最佳模型
                 final_model = best_model
-                print(f"[ModelSelection] 最终模型: {final_model}")
+                # print(f"[ModelSelection] 最终模型: {final_model}")
                 # 生成解释：最佳模型在最近 n_windows 个时间窗口的 MAE 均低于 baseline
                 best_mae = model_comparison.get(best_model)
                 baseline_mae = model_comparison.get(baseline)
@@ -839,9 +829,7 @@ class StreamingTaskProcessor:
                     )
             else:
                 # 用户指定了模型
-                print(
-                    f"[ModelSelection] 进入用户指定模型分支，用户指定: {user_specified_model}"
-                )
+                # print(f"[ModelSelection] 进入用户指定模型分支，用户指定: {user_specified_model}")
                 user_model_mae = model_comparison.get(user_specified_model)
                 baseline_mae = model_comparison.get(baseline)
 
@@ -908,14 +896,14 @@ class StreamingTaskProcessor:
             # 保存模型选择原因
             message.save_model_selection_reason(model_selection_reason)
 
-            print(f"[ModelSelection] 最终确定的模型: {final_model}")
+            # print(f"[ModelSelection] 最终确定的模型: {final_model}")
             message.update_step_detail(
                 5, "running", f"训练 {final_model.upper()} 模型..."
             )
 
         except Exception as e:
             # 如果模型选择失败，使用用户指定的模型或默认模型
-            print(f"[ModelSelection] 模型选择失败: {e}")
+            # print(f"[ModelSelection] 模型选择失败: {e}")
             final_model = user_specified_model or "prophet"
             model_comparison = {}
             is_better_than_baseline = False
