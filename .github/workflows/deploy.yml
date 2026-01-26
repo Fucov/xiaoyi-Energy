@@ -52,6 +52,11 @@ jobs:
           REDIS_PORT=6379
           REDIS_DB=0
           RAG_SERVICE_URL=http://{{ secrets.RAG_SERVICE_IP }}:8000
+          MONGODB_HOST=10.139.197.213
+          MONGODB_PORT=27017
+          MONGODB_USERNAME = "xiaoyi_user"
+          MONGODB_PASSWORD = "ACTact123@buaa#"
+          MONGODB_DATABASE = "xiaoyi_db"
           EOF
           
           echo "📝 NEXT_PUBLIC_API_URL=http://${{ steps.ip.outputs.SERVER_IP }}:18000"
