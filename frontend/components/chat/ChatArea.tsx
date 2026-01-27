@@ -53,7 +53,7 @@ export interface ChartContent {
     summary: string
     sentiment: 'positive' | 'negative' | 'neutral'
   }>
-  ticker?: string  // 股票代码，用于获取新闻
+  ticker?: string  // 区域代码，用于获取新闻
 }
 
 // 表格内容
@@ -64,10 +64,10 @@ export interface TableContent {
   rows: (string | number)[][]
 }
 
-// 股票内容
+// 股票内容（保留以兼容，实际为区域内容）
 export interface StockContent {
   type: 'stock'
-  ticker: string
+  ticker: string  // 区域代码
   title?: string
 }
 
@@ -129,7 +129,7 @@ export interface Message {
 // 预测步骤定义（6个步骤）- 与后端 FORECAST_STEPS 保持一致
 export const PREDICTION_STEPS: Omit<Step, 'status' | 'message'>[] = [
   { id: '1', name: '意图识别' },
-  { id: '2', name: '股票验证' },
+  { id: '2', name: '区域验证' },
   { id: '3', name: '数据获取' },
   { id: '4', name: '分析处理' },
   { id: '5', name: '模型预测' },
@@ -138,10 +138,10 @@ export const PREDICTION_STEPS: Omit<Step, 'status' | 'message'>[] = [
 
 // 默认快速追问建议
 const defaultQuickSuggestions = [
-  '帮我分析一下茅台，预测下个季度走势',
-  '查看最近的市场趋势',
-  '对比几只白酒股的表现',
-  '生成一份投资分析报告',
+  '预测北京未来30天的供电需求',
+  '分析上海最近用电量趋势',
+  '查看广州的天气对供电的影响',
+  '生成一份供电需求分析报告',
 ]
 
 interface ChatAreaProps {
@@ -256,8 +256,16 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     let accumulatedTimeSeriesFull: TimeSeriesPoint[] = []
     let accumulatedNews: NewsItem[] = []
     let accumulatedEmotion: { score: number; description: string } | null = null
+    let accumulatedInfluence: {
+      temperature_influence?: number
+      humidity_influence?: number
+      seasonality_influence?: number
+      trend_influence?: number
+      volatility_influence?: number
+      description?: string
+    } | null = null
     let accumulatedAnomalyZones: any[] = []  // 异常区域
-    let stockTicker = ''  // 股票代码
+    let stockTicker = ''  // 区域代码（保留变量名以兼容）
     let predictionStartDay = ''
 
     return {
@@ -310,7 +318,8 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
             backendSessionId,
             backendMessageId,
             accumulatedAnomalyZones,
-            stockTicker
+            stockTicker,
+            accumulatedInfluence
           )
         }
       },
@@ -336,9 +345,11 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
 
       // 步骤完成
       onStepComplete: (step: number, data?: any) => {
-        // 捕获股票代码（步骤2完成时）
-        if (step === 2 && data?.stock_code) {
-          stockTicker = data.stock_code
+        // 捕获区域代码（步骤2完成时）
+        if (step === 2 && data?.region_code) {
+          stockTicker = data.region_code  // 保留变量名以兼容
+        } else if (step === 2 && data?.stock_code) {
+          stockTicker = data.stock_code  // 兼容旧数据
         }
 
         const steps = PREDICTION_STEPS.map((s, idx) => {
@@ -385,18 +396,41 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         console.log('[ChatArea] onData received:', dataType, data)
         if (dataType === 'time_series_original') {
           accumulatedTimeSeriesOriginal = data as TimeSeriesPoint[]
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, null, accumulatedNews, accumulatedEmotion, null, '', backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, null, accumulatedNews, accumulatedEmotion, null, '', backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
         } else if (dataType === 'time_series_full') {
           accumulatedTimeSeriesFull = data as TimeSeriesPoint[]
           predictionStartDay = predStart || ''
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
         } else if (dataType === 'news') {
           accumulatedNews = data as NewsItem[]
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
+        } else if (dataType === 'influence') {
+          // 多因素影响力数据
+          console.log('[ChatArea] ===== 收到影响因子数据 =====')
+          console.log('[ChatArea] Raw data:', data)
+          const influenceData = data as {
+            temperature_influence?: number
+            humidity_influence?: number
+            seasonality_influence?: number
+            trend_influence?: number
+            volatility_influence?: number
+            description?: string
+          }
+          accumulatedInfluence = influenceData
+          console.log('[ChatArea] Parsed influence data:', accumulatedInfluence)
+          // 兼容：同时设置emotion（使用overall_score或平均值）
+          const overallScore = influenceData.temperature_influence && influenceData.humidity_influence && influenceData.seasonality_influence && influenceData.trend_influence && influenceData.volatility_influence
+            ? (influenceData.temperature_influence + influenceData.humidity_influence + influenceData.seasonality_influence + influenceData.trend_influence + influenceData.volatility_influence) / 5
+            : 0
+          accumulatedEmotion = { score: overallScore, description: influenceData.description || '影响因素分析' }
+          console.log('[ChatArea] Calling updateContentsFromStreamData with influence:', accumulatedInfluence)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
+          console.log('[ChatArea] ===== 影响因子数据已处理 =====')
         } else if (dataType === 'emotion') {
+          // 兼容旧的情绪数据格式
           const emotionData = data as { score: number; description: string }
           accumulatedEmotion = emotionData
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
         } else if (dataType === 'anomaly_zones') {
           console.log('[ChatArea] Received anomaly_zones:', data)
           const zonesData = data as { zones: any[]; ticker: string }
@@ -404,13 +438,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           stockTicker = zonesData.ticker || ''
           console.log('[ChatArea] Extracted - zones:', accumulatedAnomalyZones.length, 'ticker:', stockTicker)
           // 异常区数据收到后立即更新图表
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
         }
       },
 
       // 报告流式（累积）
       onReportChunk: (content: string) => {
-        updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, content, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker)
+        updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, content, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
       },
 
       // 聊天流式（累积）
@@ -442,7 +476,10 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           null,
           predictionStartDay,
           backendSessionId,
-          backendMessageId
+          backendMessageId,
+          accumulatedAnomalyZones,
+          stockTicker,
+          accumulatedInfluence
         )
       },
 
@@ -1011,15 +1048,31 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     backendSessionId?: string,  // 用于回测功能
     backendMessageId?: string,   // 用于回测功能
     anomalyZones?: any[],  // 异常区域
-    ticker?: string  // 股票代码
+    ticker?: string,  // 股票代码
+    influence?: {
+      temperature_influence?: number
+      humidity_influence?: number
+      seasonality_influence?: number
+      trend_influence?: number
+      volatility_influence?: number
+      description?: string
+    } | null
   ) => {
     setMessages((prev: Message[]) => prev.map((msg: Message) => {
       if (msg.id !== messageId) return msg
 
       const newContents: (TextContent | ChartContent | TableContent)[] = []
 
-      // 1. 情绪（如果有）
-      if (emotion) {
+      // 1. 多因素影响力（优先）或情绪（兼容）
+      if (influence) {
+        // 使用影响因子数据
+        console.log('[ChatArea] updateContentsFromStreamData: Adding influence marker with data:', influence)
+        newContents.push({
+          type: 'text',
+          text: `__INFLUENCE_MARKER__${JSON.stringify(influence)}__`
+        })
+      } else if (emotion) {
+        // 兼容旧的情绪数据格式
         newContents.push({
           type: 'text',
           text: `__EMOTION_MARKER__${emotion.score}__${emotion.description}__`
@@ -1242,7 +1295,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
                 <textarea
                   className="w-full bg-transparent px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 resize-none outline-none"
                   rows={1}
-                  placeholder="问我任何关于股票分析的问题..."
+                  placeholder="问我任何关于电力需求预测的问题..."
                   value={inputValue}
                   onChange={(e) => setInputValue(e.target.value)}
                   onKeyDown={handleKeyDown}

@@ -385,7 +385,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
           return {
             name: date,
-            历史价格: histPoint?.value ?? null,
+            历史供电量: histPoint?.value ?? null,
             实际值: truthPoint?.value ?? null,
             回测预测: predPoint?.value ?? null
           }
@@ -714,7 +714,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     setViewEndIndex(chartData.length - 1)
   }, [chartData.length])
 
-  // 如果标题包含"预测"，则不显示（因为外层已有"价格走势分析"标题）
+  // 如果标题包含"预测"，则不显示（因为外层已有"供电需求预测"标题）
   const shouldShowTitle = title && !title.includes('预测')
 
   return (
@@ -791,6 +791,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               style={{ fontSize: '12px' }}
               domain={yAxisDomain}
               allowDataOverflow={false}
+              label={{ value: '供电量(MW)', angle: -90, position: 'insideLeft' }}
               tickFormatter={(value) => {
                 // 格式化 Y 轴刻度标签，处理大数值
                 if (isNaN(value) || !isFinite(value)) {
@@ -911,14 +912,14 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               <>
                 <Line
                   type="monotone"
-                  dataKey="历史价格"
+                  dataKey="历史供电量"
                   stroke="#a855f7"
                   strokeWidth={2}
                   dot={{ r: 3 }}
                   activeDot={{ r: 5 }}
                   connectNulls={false}
                   isAnimationActive={false}
-                  name="历史价格"
+                  name="历史供电量(MW)"
                 />
                 <Line
                   type="monotone"
@@ -930,7 +931,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   activeDot={{ r: 4 }}
                   connectNulls={false}
                   isAnimationActive={false}
-                  name="实际值 (Ground Truth)"
+                  name="实际供电量(MW)"
                 />
                 <Line
                   type="monotone"
@@ -941,7 +942,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   activeDot={{ r: 5 }}
                   connectNulls={false}
                   isAnimationActive={false}
-                  name="回测预测"
+                  name="回测预测(MW)"
                 />
               </>
             ) : (
@@ -964,8 +965,8 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         </ResponsiveContainer>
 
         {/* X 轴滑块 - 明显的滑块圆点 */}
-        {((hasBacktestSupport && originalData && originalData.length > 60) || (data.datasets.some(d => d.label === '历史价格') && data.datasets.some(d => d.label === '预测价格'))) && plotAreaBounds && (() => {
-          // 计算分割点：拖拽时使用临时日期，否则使用回测分割点或历史价格和预测价格的分界点
+        {((hasBacktestSupport && originalData && originalData.length > 60) || (data.datasets.some(d => d.label === '历史供电量') && data.datasets.some(d => d.label === '预测供电量'))) && plotAreaBounds && (() => {
+          // 计算分割点：拖拽时使用临时日期，否则使用回测分割点或历史供电量和预测供电量的分界点
           let splitDate = isDraggingSlider && tempSplitDate ? tempSplitDate : backtest.splitDate
           let splitIndexInChart = -1
 
@@ -973,17 +974,17 @@ function InteractiveChart({ content }: { content: ChartContent }) {
             // 回测模式：使用指定的分割点
             splitIndexInChart = chartData.findIndex(item => item.name === splitDate)
           } else {
-            // 正常模式：查找历史价格和预测价格的分界点
-            // 找到最后一个有历史价格值的点，下一个点就是预测价格的起点
+            // 正常模式：查找历史供电量和预测供电量的分界点
+            // 找到最后一个有历史供电量值的点，下一个点就是预测供电量的起点
             for (let i = chartData.length - 1; i >= 0; i--) {
               const item = chartData[i]
-              const historicalPrice = (item as any)['历史价格']
-              if (historicalPrice !== null && historicalPrice !== undefined) {
-                // 找到下一个有预测价格的点作为分界点
+              const historicalPower = (item as any)['历史供电量']
+              if (historicalPower !== null && historicalPower !== undefined) {
+                // 找到下一个有预测供电量的点作为分界点
                 if (i + 1 < chartData.length) {
                   const nextItem = chartData[i + 1]
-                  const predictedPrice = (nextItem as any)['预测价格']
-                  if (predictedPrice !== null && predictedPrice !== undefined) {
+                  const predictedPower = (nextItem as any)['预测供电量']
+                  if (predictedPower !== null && predictedPower !== undefined) {
                     splitIndexInChart = i + 1
                     splitDate = nextItem.name as string
                     break

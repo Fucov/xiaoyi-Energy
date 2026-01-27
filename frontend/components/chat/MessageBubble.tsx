@@ -14,7 +14,90 @@ interface MessageBubbleProps {
   onRegenerateMessage?: () => void
 }
 
-// 情绪横向标尺组件
+// 多因素影响力轴组件
+function MultiFactorInfluenceAxis({ 
+  influenceData 
+}: { 
+  influenceData: {
+    temperature_influence?: number
+    humidity_influence?: number
+    seasonality_influence?: number
+    trend_influence?: number
+    volatility_influence?: number
+    description?: string
+  } | null
+}) {
+  if (!influenceData) {
+    return (
+      <div className="text-sm text-gray-400 flex items-center gap-2">
+        <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
+        <span>影响因素分析中...</span>
+      </div>
+    )
+  }
+
+  const factors = [
+    { 
+      label: '温度影响', 
+      value: influenceData.temperature_influence ?? 0.5,
+      color: 'bg-cyan-400'
+    },
+    { 
+      label: '湿度影响', 
+      value: influenceData.humidity_influence ?? 0.3,
+      color: 'bg-purple-400'
+    },
+    { 
+      label: '季节性', 
+      value: influenceData.seasonality_influence ?? 0.4,
+      color: 'bg-purple-400'
+    },
+    { 
+      label: '趋势强度', 
+      value: influenceData.trend_influence ?? 0.6,
+      color: 'bg-orange-400'
+    },
+    { 
+      label: '波动性', 
+      value: influenceData.volatility_influence ?? 0.3,
+      color: 'bg-green-400'
+    },
+  ]
+
+  return (
+    <div className="space-y-4">
+      {/* 多因素影响力轴 */}
+      <div className="space-y-3">
+        {factors.map((factor, index) => (
+          <div key={index} className="space-y-1">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-gray-300">{factor.label}</span>
+              <span className="text-sm font-semibold text-gray-200">{factor.value.toFixed(2)}</span>
+            </div>
+            {/* 进度条 */}
+            <div className="relative h-2 rounded-full overflow-hidden bg-dark-500">
+              <div
+                className={`h-full ${factor.color} transition-all duration-1000 ease-out`}
+                style={{ width: `${factor.value * 100}%` }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* 分析说明 */}
+      {influenceData.description && (
+        <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
+          <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">
+            {influenceData.description}
+          </p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// 情绪横向标尺组件（保留以兼容）
 function EmotionGauge({ emotion, description }: { emotion: number; description: string }) {
   // 将情绪值从 [-1, 1] 映射到百分比 [0%, 100%]
   const position = ((emotion + 1) / 2) * 100
@@ -203,18 +286,19 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                 const texts = contents.filter(c => c.type === 'text')
 
                 // 识别市场情绪内容（特殊标记）
+                // 查找影响因子或情绪数据标记
                 const emotionText = texts.find(t =>
-                  t.type === 'text' && t.text.startsWith('__EMOTION_MARKER__')
+                  t.type === 'text' && (t.text.startsWith('__INFLUENCE_MARKER__') || t.text.startsWith('__EMOTION_MARKER__'))
                 )
 
                 // 🎯 判断是否是简单问答
-                // 有结构化数据（图表、表格、情绪）时强制使用结构化布局，不管 renderMode 是什么
+                // 有结构化数据（图表、表格、情绪、影响因子）时强制使用结构化布局，不管 renderMode 是什么
                 const hasStructuredData = charts.length > 0 || tables.length > 0 || emotionText
                 const isSimpleAnswer = !hasStructuredData && (
                   renderMode === 'chat' || (
                     !hasSteps &&
                     texts.length > 0 &&
-                    texts.every(t => !t.text.startsWith('__EMOTION_MARKER__'))
+                    texts.every(t => !t.text.startsWith('__EMOTION_MARKER__') && !t.text.startsWith('__INFLUENCE_MARKER__'))
                   )
                 )
 
@@ -274,7 +358,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                 // 结构化回答：有图表、表格或情绪数据
                 // 识别综合分析报告（通常是最后一个文本内容，且不是情绪标记）
                 const reportText = texts.filter(t =>
-                  t.type === 'text' && !t.text.startsWith('__EMOTION_MARKER__')
+                  t.type === 'text' && !t.text.startsWith('__EMOTION_MARKER__') && !t.text.startsWith('__INFLUENCE_MARKER__')
                 ).pop() // 取最后一个文本作为报告
 
                 // 识别价格走势图表（包含"历史价格"或"预测价格"）
@@ -294,18 +378,45 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                   )
                 ) || tables[0]
 
-                // 解析情绪数据
+                // 解析影响因子数据或情绪数据
+                let influenceData: {
+                  temperature_influence?: number
+                  humidity_influence?: number
+                  seasonality_influence?: number
+                  trend_influence?: number
+                  volatility_influence?: number
+                  description?: string
+                } | null = null
                 let emotionData: { score: number; description: string } | null = null
+                
                 if (emotionText && emotionText.type === 'text') {
-                  // 使用 [\s\S]* 匹配包括换行符在内的任意字符
-                  const match = emotionText.text.match(/__EMOTION_MARKER__([^_]+)__([\s\S]*)__/)
-                  if (match) {
-                    const score = parseFloat(match[1])
-                    const description = match[2] || ''
-                    if (!isNaN(score)) {
-                      emotionData = { score, description }
+                  console.log('[MessageBubble] Found emotionText:', emotionText.text.substring(0, 100))
+                  // 优先解析影响因子数据
+                  const influenceMatch = emotionText.text.match(/__INFLUENCE_MARKER__([\s\S]*)__/)
+                  if (influenceMatch) {
+                    console.log('[MessageBubble] Matched INFLUENCE_MARKER, parsing JSON...')
+                    try {
+                      influenceData = JSON.parse(influenceMatch[1])
+                      console.log('[MessageBubble] Parsed influence data:', influenceData)
+                    } catch (e) {
+                      console.error('[MessageBubble] Failed to parse influence data:', e, 'Raw match:', influenceMatch[1])
+                    }
+                  } else {
+                    // 兼容旧的情绪数据格式
+                    const match = emotionText.text.match(/__EMOTION_MARKER__([^_]+)__([\s\S]*)__/)
+                    if (match) {
+                      console.log('[MessageBubble] Matched EMOTION_MARKER')
+                      const score = parseFloat(match[1])
+                      const description = match[2] || ''
+                      if (!isNaN(score)) {
+                        emotionData = { score, description }
+                      }
+                    } else {
+                      console.log('[MessageBubble] No marker found in emotionText')
                     }
                   }
+                } else {
+                  console.log('[MessageBubble] No emotionText found')
                 }
 
                 return (
@@ -313,14 +424,16 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     "space-y-4",
                     message.isCollapsing && "animate-collapse"
                   )}>
-                    {/* 上半部分：左右分栏 - 市场情绪(1) | 相关新闻+研报(2) */}
+                    {/* 上半部分：左右分栏 - 多因素影响力分析(1) | 相关新闻+研报(2) */}
                     <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
-                      {/* 左侧：市场情绪 */}
+                      {/* 左侧：多因素影响力分析 */}
                       <div className="glass rounded-2xl p-4">
                         <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                          <span>😊</span> 市场情绪
+                          <span>📊</span> 多因素影响力分析
                         </h3>
-                        {emotionData ? (
+                        {influenceData ? (
+                          <MultiFactorInfluenceAxis influenceData={influenceData} />
+                        ) : emotionData ? (
                           <div className="space-y-3">
                             <EmotionGauge emotion={emotionData.score} description="" />
                             {emotionData.description && (
@@ -332,7 +445,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                         ) : (
                           <div className="text-sm text-gray-400 flex items-center gap-2">
                             <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-                            <span>情绪分析中...</span>
+                            <span>影响因素分析中...</span>
                           </div>
                         )}
                       </div>
@@ -416,7 +529,9 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     {/* 其他未分类的内容（向后兼容） */}
                     {contents.filter(c => {
                       if (c === priceChart || c === reportText) return false
+                      // 跳过影响因子和情绪标记文本（需要先检查是否为文本类型）
                       if (emotionText === c) return false
+                      if (c.type === 'text' && (c.text.startsWith('__INFLUENCE_MARKER__') || c.text.startsWith('__EMOTION_MARKER__'))) return false
                       if (newsTable === c) return false
                       return true
                     }).map((content, index) => (

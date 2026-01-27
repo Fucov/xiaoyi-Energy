@@ -243,7 +243,7 @@ export interface FullStreamEvent {
   step?: number
   step_name?: string
   content?: string
-  data_type?: 'time_series_original' | 'time_series_full' | 'news' | 'emotion' | 'anomaly_zones'
+  data_type?: 'time_series_original' | 'time_series_full' | 'news' | 'emotion' | 'influence' | 'anomaly_zones'
   data?: unknown
   prediction_start_day?: string
   intent?: string
