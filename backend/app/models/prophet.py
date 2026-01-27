@@ -48,8 +48,14 @@ class ProphetForecaster(BaseForecaster):
             changepoint_range=params.get("changepoint_range", 0.8),
         )
 
+        # Prophet不支持带时区的datetime，需要移除时区信息
+        df_clean = df.copy()
+        if df_clean["ds"].dt.tz is not None:
+            # 如果ds列有时区信息，转换为naive datetime（保留本地时间）
+            df_clean["ds"] = df_clean["ds"].dt.tz_localize(None)
+
         # 训练模型
-        model.fit(df[["ds", "y"]])
+        model.fit(df_clean[["ds", "y"]])
 
         # 生成未来时间点（多生成以确保有足够交易日）
         future = model.make_future_dataframe(periods=horizon * 2, freq="D")
@@ -71,8 +77,8 @@ class ProphetForecaster(BaseForecaster):
                     break
 
         # 计算训练集指标
-        train_pred = forecast.head(len(df))
-        residuals = df["y"].values - train_pred["yhat"].values
+        train_pred = forecast.head(len(df_clean))
+        residuals = df_clean["y"].values - train_pred["yhat"].values
         mae = np.mean(np.abs(residuals))
         rmse = np.sqrt(np.mean(residuals ** 2))
 

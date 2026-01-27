@@ -11,7 +11,9 @@ import os  # 用于读取环境变量
 import json
 import traceback
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any, Callable, Awaitable
+import pandas as pd
 
 from app.core.session import Session, Message
 from app.core.redis_client import get_redis
@@ -19,13 +21,16 @@ from app.schemas.session_schema import (
     TimeSeriesPoint,
     UnifiedIntent,
     ResolvedKeywords,
-    StockMatchResult,
+    StockMatchResult,  # 保留以兼容
+    RegionMatchResult,
     SummarizedNewsItem,
 )
 
 # Services
-from app.services.stock_matcher import get_stock_matcher
+from app.services.stock_matcher import get_stock_matcher  # 保留以兼容
+from app.services.region_matcher import get_region_matcher
 from app.services.rag_client import check_rag_availability
+from app.services.influence_analyzer import InfluenceAnalyzer
 
 # Agents
 from app.agents import (
@@ -45,7 +50,7 @@ from app.models import TimeSeriesAnalyzer
 
 # Workflows
 from app.core.workflows import (
-    fetch_stock_data,
+    fetch_power_data,
     fetch_news_all,
     fetch_rag_reports,
     search_web,
@@ -82,7 +87,8 @@ class StreamingTaskProcessor:
         self.error_explainer = ErrorExplainerAgent()
         self.sentiment_agent = SentimentAgent()
         self.news_summary_agent = NewsSummaryAgent()
-        self.stock_matcher = get_stock_matcher()
+        self.stock_matcher = get_stock_matcher()  # 保留以兼容
+        self.region_matcher = get_region_matcher()
         self.redis = get_redis()
 
     async def execute_streaming(
@@ -187,28 +193,30 @@ class StreamingTaskProcessor:
                 1, "completed", f"意图: {'预测' if intent.is_forecast else '对话'}"
             )
 
-            # === Step 2: 股票验证 ===
-            stock_match_result = None
+            # === Step 2: 区域验证 ===
+            region_match_result = None
+            stock_match_result = None  # 保留以兼容
             resolved_keywords = None
 
-            if intent.stock_mention:
+            # 优先使用region_mention，如果没有则使用stock_mention（兼容旧数据）
+            region_mention = intent.region_mention or intent.stock_mention
+            
+            if region_mention:
                 await self._emit_event(
                     event_queue,
                     message,
-                    {"type": "step_start", "step": 2, "step_name": "股票验证"},
+                    {"type": "step_start", "step": 2, "step_name": "区域验证"},
                 )
 
-                query_name = intent.stock_full_name or intent.stock_mention
-                message.update_step_detail(2, "running", f"验证股票: {query_name}")
+                query_name = intent.region_name or intent.stock_full_name or region_mention
+                message.update_step_detail(2, "running", f"验证区域: {query_name}")
 
-                stock_match_result = await asyncio.to_thread(
-                    self.stock_matcher.match, query_name
+                region_match_result = await asyncio.to_thread(
+                    self.region_matcher.match, query_name
                 )
 
-                message.save_stock_match(stock_match_result)
-
-                if not stock_match_result.success:
-                    error_msg = stock_match_result.error_message or "股票验证失败"
+                if not region_match_result or not region_match_result.matched:
+                    error_msg = f"未找到区域「{query_name}」，请检查区域名称是否正确。支持的区域: 北京、上海、广州、深圳、杭州、成都、武汉、西安、南京、天津"
                     message.save_conclusion(error_msg)
                     message.update_step_detail(2, "error", error_msg)
                     message.mark_completed()
@@ -216,11 +224,11 @@ class StreamingTaskProcessor:
                     await self._emit_error(event_queue, message, error_msg)
                     return
 
-                stock_info = stock_match_result.stock_info
+                region_info = region_match_result.region_info
                 resolved_keywords = self.intent_agent.resolve_keywords(
                     intent,
-                    stock_name=stock_info.stock_name if stock_info else None,
-                    stock_code=stock_info.stock_code if stock_info else None,
+                    region_name=region_info.region_name if region_info else None,
+                    region_code=region_info.region_code if region_info else None,
                 )
                 message.save_resolved_keywords(resolved_keywords)
 
@@ -231,16 +239,16 @@ class StreamingTaskProcessor:
                         "type": "step_complete",
                         "step": 2,
                         "data": {
-                            "stock_code": stock_info.stock_code if stock_info else "",
-                            "stock_name": stock_info.stock_name if stock_info else "",
+                            "region_code": region_info.region_code if region_info else "",
+                            "region_name": region_info.region_name if region_info else "",
                         },
                     },
                 )
                 message.update_step_detail(
                     2,
                     "completed",
-                    f"匹配: {stock_info.stock_name}({stock_info.stock_code})"
-                    if stock_info
+                    f"匹配: {region_info.region_name}({region_info.region_code})"
+                    if region_info
                     else "无匹配",
                 )
             else:
@@ -257,7 +265,7 @@ class StreamingTaskProcessor:
                     session,
                     user_input,
                     intent,
-                    stock_match_result,
+                    region_match_result,  # 使用region_match_result
                     resolved_keywords,
                     conversation_history,
                     event_queue,
@@ -268,7 +276,7 @@ class StreamingTaskProcessor:
                     session,
                     user_input,
                     intent,
-                    stock_match_result,
+                    region_match_result,  # 使用region_match_result
                     resolved_keywords,
                     conversation_history,
                     event_queue,
@@ -360,15 +368,15 @@ class StreamingTaskProcessor:
         session: Session,
         user_input: str,
         intent: UnifiedIntent,
-        stock_match: Optional[StockMatchResult],
+        region_match: Optional[RegionMatchResult],
         keywords: ResolvedKeywords,
         conversation_history: List[dict],
         event_queue: asyncio.Queue | None,
     ):
         """流式预测流程"""
-        stock_info = stock_match.stock_info if stock_match else None
-        stock_code = stock_info.stock_code if stock_info else ""
-        stock_name = stock_info.stock_name if stock_info else user_input
+        region_info = region_match.region_info if region_match else None
+        region_name = region_info.region_name if region_info else user_input
+        region_code = region_info.region_code if region_info else ""
 
         # === Step 3: 数据获取 ===
         await self._emit_event(
@@ -378,17 +386,25 @@ class StreamingTaskProcessor:
         )
         message.update_step_detail(3, "running", "获取历史数据和新闻...")
 
-        end_date = datetime.now().strftime("%Y%m%d")
-        start_date = (datetime.now() - timedelta(days=intent.history_days)).strftime(
+        # 限制历史天数，确保不超过Open-Meteo API限制（92天）
+        # 同时确保有足够的数据用于模型训练
+        effective_history_days = min(intent.history_days, 92)
+        effective_history_days = max(effective_history_days, 30)  # 至少30天用于训练
+        
+        # 使用北京时区确保一致性
+        BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+        now = datetime.now(BEIJING_TZ)
+        end_date = now.strftime("%Y%m%d")
+        start_date = (now - timedelta(days=effective_history_days)).strftime(
             "%Y%m%d"
         )
 
         # 并行获取数据
-        stock_data_task = asyncio.create_task(
-            fetch_stock_data(stock_code, start_date, end_date)
+        power_data_task = asyncio.create_task(
+            fetch_power_data(region_name, start_date, end_date, effective_history_days)
         )
         news_task = asyncio.create_task(
-            fetch_news_all(stock_code, stock_name, intent.history_days)
+            fetch_news_all(region_name, intent.history_days)
         )
         rag_available = await check_rag_availability() if intent.enable_rag else False
         rag_task = (
@@ -399,17 +415,18 @@ class StreamingTaskProcessor:
             else None
         )
 
-        # 优先获取股票数据
+        # 优先获取供电需求数据和天气数据
         try:
-            stock_result = await stock_data_task
+            power_result = await power_data_task
         except Exception as e:
-            stock_result = e
+            power_result = e
 
-        # 处理股票数据
+        # 处理供电需求数据
         df = None
-        if isinstance(stock_result, DataFetchError):
+        weather_df = None
+        if isinstance(power_result, DataFetchError):
             error_explanation = await asyncio.to_thread(
-                self.error_explainer.explain_data_fetch_error, stock_result, user_input
+                self.error_explainer.explain_data_fetch_error, power_result, user_input
             )
             message.save_conclusion(error_explanation)
             message.update_step_detail(3, "error", "数据获取失败")
@@ -418,8 +435,8 @@ class StreamingTaskProcessor:
                 rag_task.cancel()
             await self._emit_error(event_queue, message, error_explanation)
             return
-        elif isinstance(stock_result, Exception):
-            error_msg = f"获取数据时发生错误: {str(stock_result)}"
+        elif isinstance(power_result, Exception):
+            error_msg = f"获取数据时发生错误: {str(power_result)}"
             message.save_conclusion(error_msg)
             message.update_step_detail(3, "error", "数据获取失败")
             news_task.cancel()
@@ -428,10 +445,15 @@ class StreamingTaskProcessor:
             await self._emit_error(event_queue, message, error_msg)
             return
         else:
-            df = stock_result
+            # 处理返回的元组 (供电数据, 天气数据)
+            if isinstance(power_result, tuple):
+                df, weather_df = power_result
+            else:
+                df = power_result
+                weather_df = None
 
         if df is None or df.empty:
-            error_msg = f"无法获取 {stock_name} 的历史数据，请检查股票代码是否正确。"
+            error_msg = f"无法获取 {region_name} 的历史供电需求数据，请检查区域名称是否正确。"
             message.save_conclusion(error_msg)
             message.update_step_detail(3, "error", "数据获取失败")
             news_task.cancel()
@@ -440,7 +462,7 @@ class StreamingTaskProcessor:
             await self._emit_error(event_queue, message, error_msg)
             return
 
-        # 立即保存并发送股票数据
+        # 立即保存并发送供电需求数据
         original_points = df_to_points(df, is_prediction=False)
         message.save_time_series_original(original_points)
 
@@ -535,7 +557,7 @@ class StreamingTaskProcessor:
 
             # === Redis 全局缓存检查 ===
             redis_client = get_redis()
-            cache_key = f"stock_zones:{stock_code}"
+            cache_key = f"power_zones:{region_code}"
             cached_zones_json = None
 
             try:
@@ -545,7 +567,7 @@ class StreamingTaskProcessor:
 
                     anomaly_zones = json.loads(cached_zones_json)
                     print(
-                        f"[AnomalyZones] ✓ Using Redis cached {len(anomaly_zones)} zones for {stock_code}"
+                        f"[AnomalyZones] ✓ Using Redis cached {len(anomaly_zones)} zones for {region_code}"
                     )
             except Exception as e:
                 print(f"[AnomalyZones] Redis cache read error: {e}")
@@ -594,7 +616,7 @@ class StreamingTaskProcessor:
                             regex_pattern = "^(" + "|".join(zone_dates) + ")"
                             zone_news_cursor = news_collection.find(
                                 {
-                                    "stock_code": stock_code,
+                                    "region_code": region_code,  # 使用region_code替代stock_code
                                     "publish_time": {"$regex": regex_pattern},
                                     # 不过滤content_type，包含所有类型
                                 }
@@ -682,7 +704,7 @@ class StreamingTaskProcessor:
 
             # 保存并发送异常区域数据
             if anomaly_zones:
-                message.save_anomaly_zones(anomaly_zones, stock_code)
+                message.save_anomaly_zones(anomaly_zones, region_code)
 
                 await self._emit_event(
                     event_queue,
@@ -690,7 +712,7 @@ class StreamingTaskProcessor:
                     {
                         "type": "data",
                         "data_type": "anomaly_zones",
-                        "data": {"zones": anomaly_zones, "ticker": stock_code},
+                        "data": {"zones": anomaly_zones, "ticker": region_code},
                     },
                 )
                 print(f"[AnomalyZones] Successfully saved and emitted")
@@ -714,24 +736,28 @@ class StreamingTaskProcessor:
             3, "completed", f"历史数据 {len(df)} 天, 新闻 {len(news_items)} 条"
         )
 
-        # === Step 4: 分析处理（情绪流式输出）===
+        # === Step 4: 分析处理（多因素影响力分析）===
         await self._emit_event(
             event_queue,
             message,
             {"type": "step_start", "step": 4, "step_name": "分析处理"},
         )
-        message.update_step_detail(4, "running", "分析时序特征和市场情绪...")
+        message.update_step_detail(4, "running", "分析时序特征和多因素影响力...")
 
         # 时序特征分析
         features = await asyncio.to_thread(TimeSeriesAnalyzer.analyze_features, df)
 
-        # 流式情绪分析
-        emotion_result = await self._step_sentiment_streaming(
-            summarized_news, event_queue, message
+        # 多因素影响力分析（替代情绪分析）
+        print(f"[Influence] 准备分析影响因子，供电数据: {len(df) if df is not None else 0} 条，天气数据: {len(weather_df) if weather_df is not None else 0} 条")
+        influence_result = await self._step_influence_analysis(
+            df, weather_df, event_queue, message
         )
+        print(f"[Influence] 影响因子分析完成，结果: {influence_result}")
 
+        # 保存影响因子数据（兼容原有emotion字段）
         message.save_emotion(
-            emotion_result.get("score", 0), emotion_result.get("description", "中性")
+            influence_result.get("overall_score", 0), 
+            influence_result.get("description", "影响因素分析")
         )
 
         await self._emit_event(
@@ -742,14 +768,14 @@ class StreamingTaskProcessor:
                 "step": 4,
                 "data": {
                     "trend": features.get("trend", "N/A"),
-                    "emotion": emotion_result.get("description", "中性"),
+                    "influence": influence_result.get("description", "影响因素分析"),
                 },
             },
         )
         message.update_step_detail(
             4,
             "completed",
-            f"趋势: {features.get('trend', 'N/A')}, 情绪: {emotion_result.get('description', 'N/A')}",
+            f"趋势: {features.get('trend', 'N/A')}, 影响因素: {influence_result.get('description', '分析完成')}",
         )
 
         # === Step 5: 模型预测 ===
@@ -761,188 +787,74 @@ class StreamingTaskProcessor:
         message.update_step_detail(5, "running", f"训练模型...")
 
         prophet_params = await recommend_forecast_params(
-            self.sentiment_agent, emotion_result or {}, features
+            self.sentiment_agent, influence_result or {}, features
         )
 
         # 计算预测天数
         last_date = df["ds"].max().to_pydatetime()
+        # 确保last_date有时区信息
+        BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+        if last_date.tzinfo is None:
+            last_date = last_date.replace(tzinfo=BEIJING_TZ)
+        
         target_date_from_start = last_date + timedelta(days=90)
         # print(f"[ModelSelection] 目标日期从开始: {target_date_from_start}")
-        target_date_to_today = datetime.now()
+        # 确保target_date_to_today也是timezone-aware的
+        target_date_to_today = datetime.now(BEIJING_TZ)
         # print(f"[ModelSelection] 目标日期到今天: {target_date_to_today}")
         target_date = max(target_date_from_start, target_date_to_today)
         # print(f"[ModelSelection] 目标日期: {target_date}")
         forecast_horizon = max((target_date - last_date).days, 1)
         # print(f"[ModelSelection] 预测天数: {forecast_horizon}")
 
-        # 模型选择：构建候选模型列表
-        candidate_models = ["prophet", "xgboost", "randomforest", "dlinear"]
+        # 模型选择：Demo模式 - 为了轻量化展示，默认使用Prophet模型
+        # 跳过复杂的模型选择过程，直接使用Prophet
         user_specified_model = intent.forecast_model
-        # print(f"[ModelSelection] 用户指定模型: {user_specified_model}")
+        
+        # Demo模式：默认使用Prophet，跳过复杂的模型选择过程
+        if not user_specified_model or user_specified_model == "auto":
+            final_model = "prophet"
+            model_selection_reason = "Demo模式：使用Prophet模型进行预测（轻量化展示）"
+        else:
+            # 用户指定了模型，使用用户指定的模型
+            final_model = user_specified_model
+            model_selection_reason = f"使用用户指定的 {user_specified_model.upper()} 模型"
+        
+        # 发送模型选择事件（简化版）
+        await self._emit_event(
+            event_queue,
+            message,
+            {
+                "type": "model_selection",
+                "selected_model": final_model,
+                "best_model": final_model,
+                "baseline": "seasonal_naive",
+                "model_comparison": {},
+                "is_better_than_baseline": False,
+                "user_specified_model": user_specified_model,
+                "model_selection_reason": model_selection_reason,
+            },
+        )
 
-        # 调用模型选择器
-        try:
-            selection_result = await select_best_model(
-                df, candidate_models, forecast_horizon, n_windows=3, min_train_size=60
-            )
+        # 保存模型选择信息到 Message
+        message.save_model_selection(
+            final_model, {}, False
+        )
 
-            best_model = selection_result["best_model"]
-            baseline = selection_result["baseline"]
-            model_comparison = selection_result["metrics"]
-            is_better_than_baseline = selection_result["is_better_than_baseline"]
+        # 保存模型选择原因
+        message.save_model_selection_reason(model_selection_reason)
 
-            # print(f"[ModelSelection] 选择的最佳模型: {best_model}")
-            # print(f"[ModelSelection] Baseline: {baseline}")
-            # print(f"[ModelSelection] 用户指定模型: {user_specified_model}")
-
-            # 确定最终使用的模型并生成解释信息
-            model_selection_reason = ""
-            enable_baseline_penalty = self.ENABLE_BASELINE_PENALTY
-
-            if not user_specified_model or user_specified_model == "auto":
-                # print(f"[ModelSelection] 进入自动选择分支")
-                # 用户未指定模型，使用最佳模型
-                final_model = best_model
-                # print(f"[ModelSelection] 最终模型: {final_model}")
-                # 生成解释：最佳模型在最近 n_windows 个时间窗口的 MAE 均低于 baseline
-                best_mae = model_comparison.get(best_model)
-                baseline_mae = model_comparison.get(baseline)
-
-                if best_mae is not None and baseline_mae is not None:
-                    model_name_upper = best_model.upper()
-                    baseline_name = baseline.replace("_", " ").title()
-                    if enable_baseline_penalty and best_mae >= baseline_mae:
-                        # 如果启用惩罚机制且最佳模型不如 baseline，使用 baseline
-                        final_model = baseline
-                        model_selection_reason = (
-                            f"最佳模型 {model_name_upper} 在最近 3 个时间窗口的 MAE ({best_mae:.4f}) "
-                            f"不优于 {baseline_name} ({baseline_mae:.4f})，已自动降级为 {baseline_name}"
-                        )
-                    else:
-                        model_selection_reason = (
-                            f"{model_name_upper} 在最近 3 个时间窗口的 MAE ({best_mae:.4f}) "
-                            f"均低于 {baseline_name} ({baseline_mae:.4f})"
-                        )
-                else:
-                    model_selection_reason = (
-                        f"自动选择 {best_model.upper()} 作为最佳模型"
-                    )
-            else:
-                # 用户指定了模型
-                # print(f"[ModelSelection] 进入用户指定模型分支，用户指定: {user_specified_model}")
-                user_model_mae = model_comparison.get(user_specified_model)
-                baseline_mae = model_comparison.get(baseline)
-
-                # 根据开关决定是否启用 baseline 惩罚机制
-                if enable_baseline_penalty and (
-                    user_model_mae is not None
-                    and baseline_mae is not None
-                    and user_model_mae >= baseline_mae
-                ):
-                    # 启用惩罚机制：如果用户指定的模型 MAE >= baseline，则降级为 baseline
-                    final_model = baseline
-                    user_model_name = user_specified_model.upper()
-                    baseline_name = baseline.replace("_", " ").title()
-                    model_selection_reason = (
-                        f"用户指定模型 {user_model_name} 在历史回测中不优于基线 "
-                        f"({user_model_mae:.4f} >= {baseline_mae:.4f})，已自动降级为 {baseline_name}"
-                    )
-                else:
-                    # 禁用惩罚机制或用户模型优于 baseline：使用用户指定的模型
-                    final_model = user_specified_model
-                    user_model_name = user_specified_model.upper()
-                    if user_model_mae is not None:
-                        if (
-                            not enable_baseline_penalty
-                            and baseline_mae is not None
-                            and user_model_mae >= baseline_mae
-                        ):
-                            # 禁用惩罚机制但用户模型不如 baseline
-                            model_selection_reason = (
-                                f"使用用户指定的 {user_model_name} 模型 "
-                                f"(历史回测 MAE: {user_model_mae:.4f}，baseline: {baseline_mae:.4f})"
-                            )
-                        else:
-                            model_selection_reason = (
-                                f"使用用户指定的 {user_model_name} 模型 "
-                                f"(历史回测 MAE: {user_model_mae:.4f})"
-                            )
-                    else:
-                        model_selection_reason = (
-                            f"使用用户指定的 {user_model_name} 模型"
-                        )
-
-            # 发送模型选择信息
-            await self._emit_event(
-                event_queue,
-                message,
-                {
-                    "type": "model_selection",
-                    "selected_model": final_model,
-                    "best_model": best_model,
-                    "baseline": baseline,
-                    "model_comparison": model_comparison,
-                    "is_better_than_baseline": is_better_than_baseline,
-                    "user_specified_model": user_specified_model,
-                    "model_selection_reason": model_selection_reason,
-                },
-            )
-
-            # 保存模型选择信息到 Message
-            message.save_model_selection(
-                final_model, model_comparison, is_better_than_baseline
-            )
-
-            # 保存模型选择原因
-            message.save_model_selection_reason(model_selection_reason)
-
-            # print(f"[ModelSelection] 最终确定的模型: {final_model}")
-            message.update_step_detail(
-                5, "running", f"训练 {final_model.upper()} 模型..."
-            )
-
-        except Exception as e:
-            # 如果模型选择失败，使用用户指定的模型或默认模型
-            # print(f"[ModelSelection] 模型选择失败: {e}")
-            final_model = user_specified_model or "prophet"
-            model_comparison = {}
-            is_better_than_baseline = False
-
-            # 生成失败时的解释信息
-            if user_specified_model:
-                model_selection_reason = f"模型选择过程出现错误，使用用户指定的 {user_specified_model.upper()} 模型"
-            else:
-                model_selection_reason = (
-                    f"模型选择过程出现错误，使用默认的 {final_model.upper()} 模型"
-                )
-
-            await self._emit_event(
-                event_queue,
-                message,
-                {
-                    "type": "model_selection",
-                    "selected_model": final_model,
-                    "best_model": final_model,
-                    "baseline": "seasonal_naive",
-                    "model_comparison": model_comparison,
-                    "is_better_than_baseline": is_better_than_baseline,
-                    "user_specified_model": user_specified_model,
-                    "selection_failed": True,
-                    "error": str(e),
-                    "model_selection_reason": model_selection_reason,
-                },
-            )
-
-            # 保存模型选择原因
-            message.save_model_selection_reason(model_selection_reason)
+        message.update_step_detail(
+            5, "running", f"训练 {final_model.upper()} 模型..."
+        )
 
         prophet_params = await recommend_forecast_params(
-            self.sentiment_agent, emotion_result or {}, features
+            self.sentiment_agent, influence_result or {}, features
         )
 
         # 只对最终选定的模型调用一次 run_forecast
         forecast_result = await run_forecast(
-            df, intent.forecast_model, max(forecast_horizon, 1), prophet_params
+            df, final_model, max(forecast_horizon, 1), prophet_params
         )
 
         # 保存并发送预测结果（forecast_result 是 ForecastResult 对象）
@@ -1001,7 +913,7 @@ class StreamingTaskProcessor:
             user_input,
             features,
             forecast_dict,
-            emotion_result or {},
+            influence_result or {},  # 使用影响因子结果替代情绪结果
             conversation_history,
             event_queue,
             message,
@@ -1021,13 +933,15 @@ class StreamingTaskProcessor:
         _session: Session,  # 保留参数以保持接口一致性
         user_input: str,
         intent: UnifiedIntent,
-        stock_match: Optional[StockMatchResult],
+        region_match: Optional[RegionMatchResult],
         keywords: ResolvedKeywords,
         conversation_history: List[dict],
         event_queue: asyncio.Queue | None,
     ):
         """流式聊天流程"""
-        step_num = 3 if intent.stock_mention else 2
+        # 优先使用region_mention，如果没有则使用stock_mention（兼容）
+        region_mention = intent.region_mention or intent.stock_mention
+        step_num = 3 if region_mention else 2
 
         # === 数据获取 ===
         await self._emit_event(
@@ -1053,12 +967,12 @@ class StreamingTaskProcessor:
             task_names.append("search")
 
         if intent.enable_domain_info:
-            stock_code = (
-                stock_match.stock_info.stock_code
-                if stock_match and stock_match.stock_info
+            region_name = (
+                region_match.region_info.region_name
+                if region_match and region_match.region_info
                 else ""
             )
-            tasks.append(fetch_domain_news(stock_code, keywords.domain_keywords))
+            tasks.append(fetch_domain_news(region_name, keywords.domain_keywords))
             task_names.append("domain")
 
         results = {}
@@ -1193,7 +1107,74 @@ class StreamingTaskProcessor:
 
         return full_content
 
-    # ========== 流式情绪分析 ==========
+    # ========== 多因素影响力分析 ==========
+
+    async def _step_influence_analysis(
+        self,
+        power_df: pd.DataFrame,
+        weather_df: Optional[pd.DataFrame],
+        event_queue: asyncio.Queue | None,
+        message: Message,
+    ) -> Dict[str, Any]:
+        """多因素影响力分析（替代情绪分析）"""
+        
+        # 如果没有天气数据，返回默认值
+        if weather_df is None or weather_df.empty:
+            default_result = {
+                "temperature_influence": 0.5,
+                "humidity_influence": 0.3,
+                "seasonality_influence": 0.4,
+                "trend_influence": 0.6,
+                "volatility_influence": 0.3,
+                "overall_score": 0.0,
+                "description": "天气数据不足，使用默认影响因子"
+            }
+            print(f"[Influence] 天气数据为空，发送默认影响因子: {default_result}")
+            await self._emit_event(
+                event_queue,
+                message,
+                {
+                    "type": "data",
+                    "data_type": "influence",
+                    "data": default_result,
+                },
+            )
+            return default_result
+        
+        # 计算影响因子
+        influence_result = await asyncio.to_thread(
+            InfluenceAnalyzer.analyze_weather_influence,
+            power_df,
+            weather_df
+        )
+        
+        # 计算总体得分（各因素的平均值）
+        overall_score = (
+            influence_result.get("temperature_influence", 0) +
+            influence_result.get("humidity_influence", 0) +
+            influence_result.get("seasonality_influence", 0) +
+            influence_result.get("trend_influence", 0) +
+            influence_result.get("volatility_influence", 0)
+        ) / 5
+        
+        influence_result["overall_score"] = round(overall_score, 2)
+        
+        # 发送影响因子数据
+        print(f"[Influence] 发送影响因子数据: {influence_result}")
+        await self._emit_event(
+            event_queue,
+            message,
+            {
+                "type": "data",
+                "data_type": "influence",
+                "data": influence_result,
+            },
+        )
+        print(f"[Influence] 影响因子数据已发送")
+        
+        return influence_result
+
+    # ========== 流式情绪分析（保留以兼容）==========
 
     async def _step_sentiment_streaming(
         self,

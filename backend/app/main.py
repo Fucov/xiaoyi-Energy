@@ -5,7 +5,8 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.v2 import api_router as api_router_v2
-from app.services.stock_matcher import get_stock_matcher
+from app.services.stock_matcher import get_stock_matcher  # 保留以兼容
+from app.services.region_matcher import get_region_matcher
 from app.services.rag_client import get_rag_client
 
 
@@ -28,16 +29,13 @@ async def check_external_services():
     except Exception as e:
         print(f"[Startup] RAG 服务连接失败: {e}")
 
-    # 检查 Stock Matcher (使用 AkShare)
+    # 检查 Region Matcher
     try:
-        stock_matcher = get_stock_matcher()
-        if stock_matcher.ensure_collection_exists():
-            count = stock_matcher.get_stock_count()
-            print(f"[Startup] Stock Matcher 正常，股票数量: {count}")
-        else:
-            print("[Startup] Stock Matcher 加载股票列表失败")
+        region_matcher = get_region_matcher()
+        regions = region_matcher.get_all_regions()
+        print(f"[Startup] Region Matcher 正常，支持区域数量: {len(regions)}")
     except Exception as e:
-        print(f"[Startup] Stock Matcher 初始化失败: {e}")
+        print(f"[Startup] Region Matcher 初始化失败: {e}")
 
 
 @asynccontextmanager

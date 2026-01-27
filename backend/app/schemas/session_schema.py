@@ -43,10 +43,17 @@ class TimeSeriesPoint(BaseModel):
 
 
 class StockInfo(BaseModel):
-    """股票信息 (股票 RAG 匹配结果)"""
+    """股票信息 (股票 RAG 匹配结果) - 保留以兼容旧数据"""
     stock_code: str        # "600519"
     stock_name: str        # "贵州茅台"
     market: str            # "SH" | "SZ"
+
+
+class RegionInfo(BaseModel):
+    """区域信息 (区域匹配结果)"""
+    region_code: str       # "BJ"
+    region_name: str       # "北京"
+    timezone: str          # "Asia/Shanghai"
 
 
 class RAGSource(BaseModel):
@@ -119,31 +126,34 @@ class UnifiedIntent(BaseModel):
     一次 LLM 调用返回所有信息，包含:
     - 核心分支判断 (is_in_scope, is_forecast)
     - 工具开关 (enable_rag, enable_search, enable_domain_info)
-    - 股票相关 (stock_mention)
-    - 初步关键词 (raw_*_keywords，股票匹配后会被优化)
+    - 区域相关 (region_mention, stock_mention保留以兼容)
+    - 初步关键词 (raw_*_keywords，区域匹配后会被优化)
     - 预测参数 (仅 is_forecast=true 时使用)
     """
     # 核心分支判断
-    is_in_scope: bool = Field(..., description="是否在服务范围内 (金融/股票相关)")
+    is_in_scope: bool = Field(..., description="是否在服务范围内 (电力需求相关)")
     is_forecast: bool = Field(default=False, description="是否需要预测")
 
     # 工具开关
     enable_rag: bool = Field(default=False, description="研报检索")
     enable_search: bool = Field(default=False, description="网络搜索 (Tavily)")
-    enable_domain_info: bool = Field(default=False, description="领域信息 (AkShare news)")
+    enable_domain_info: bool = Field(default=False, description="领域信息 (天气新闻)")
 
-    # 股票相关
-    stock_mention: Optional[str] = Field(default=None, description="用户提到的股票名称/代码")
-    stock_full_name: Optional[str] = Field(default=None, description="LLM 生成的股票官方全称 (如 '中石油' -> '中国石油')")
+    # 区域相关（新增）
+    region_mention: Optional[str] = Field(default=None, description="用户提到的区域名称")
+    region_name: Optional[str] = Field(default=None, description="LLM 生成的标准城市名称 (如 '帝都' -> '北京')")
+    
+    # 股票相关（保留以兼容旧数据）
+    stock_mention: Optional[str] = Field(default=None, description="用户提到的股票名称/代码（已废弃，使用region_mention）")
+    stock_full_name: Optional[str] = Field(default=None, description="LLM 生成的股票官方全称（已废弃，使用region_name）")
 
-    # 初步关键词 (LLM 提取，股票匹配后会被优化)
+    # 初步关键词 (LLM 提取，区域匹配后会被优化)
     raw_search_keywords: List[str] = Field(default_factory=list)
     raw_rag_keywords: List[str] = Field(default_factory=list)
     raw_domain_keywords: List[str] = Field(default_factory=list)
 
     # 预测参数 (仅 is_forecast=true 时使用)
     forecast_model: Optional[str] = Field(default=None, description="预测模型名称，None 表示自动选择")
-    print(f"[UnifiedIntent] forecast_model: {forecast_model}")
     history_days: int = Field(default=365)
     forecast_horizon: int = Field(default=30)
 
@@ -155,19 +165,26 @@ class UnifiedIntent(BaseModel):
 
 
 class ResolvedKeywords(BaseModel):
-    """股票匹配后的最终关键词"""
+    """区域匹配后的最终关键词"""
     search_keywords: List[str] = Field(default_factory=list)
     rag_keywords: List[str] = Field(default_factory=list)
     domain_keywords: List[str] = Field(default_factory=list)
 
 
 class StockMatchResult(BaseModel):
-    """股票匹配结果"""
+    """股票匹配结果 - 保留以兼容旧数据"""
     success: bool
     stock_info: Optional[StockInfo] = None
     confidence: float = 0.0
     suggestions: List[str] = Field(default_factory=list)
     error_message: Optional[str] = None
+
+
+class RegionMatchResult(BaseModel):
+    """区域匹配结果"""
+    region_info: RegionInfo
+    matched: bool = True
+    original_input: str = ""
 
 
 # ========== 核心数据模型 ==========

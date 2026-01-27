@@ -6,16 +6,17 @@ Workflows 模块
 """
 
 # 数据获取
-from .data_fetch import fetch_stock_data, fetch_rag_reports
+from .data_fetch import fetch_power_data, fetch_rag_reports
+# fetch_stock_data 已废弃，如需兼容请从 data_fetch 直接导入
 
 # 新闻获取
 from .news import (
-    fetch_akshare_news,
     fetch_tavily_news,
     fetch_news_all,
     search_web,
     fetch_domain_news,
 )
+# fetch_akshare_news 已移除，不再需要
 
 # 分析
 from .analysis import recommend_forecast_params
@@ -30,10 +31,9 @@ from .converters import df_to_points
 
 __all__ = [
     # data_fetch.py
-    "fetch_stock_data",
+    "fetch_power_data",
     "fetch_rag_reports",
     # news.py
-    "fetch_akshare_news",
     "fetch_tavily_news",
     "fetch_news_all",
     "search_web",

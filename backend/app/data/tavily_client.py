@@ -107,3 +107,38 @@ class TavilyNewsClient:
             search_depth="advanced",
             include_domains=CN_FINANCE_DOMAINS,
         )
+
+    def search_weather_news(
+        self,
+        region_name: str,
+        start_date: Optional[str] = None,  # 格式: YYYY-MM-DD
+        end_date: Optional[str] = None,    # 格式: YYYY-MM-DD
+        days: int = 30,                    # 保留作为 fallback，当 start_date/end_date 未指定时使用
+        max_results: int = 10,
+    ) -> Dict:
+        """
+        搜索天气/电力相关新闻
+        
+        Args:
+            region_name: 区域名称（城市名称）
+            start_date: 开始日期
+            end_date: 结束日期
+            days: 天数
+            max_results: 最大结果数
+        
+        Returns:
+            搜索结果字典
+        """
+        # 构建搜索查询：搜索天气相关关键词（寒潮、高温、电力等）
+        query = f"{region_name} 天气 寒潮 高温 电力 供电"
+        
+        # 使用通用搜索，不限制域名（天气新闻可能来自多个来源）
+        return self.search(
+            query=query,
+            start_date=start_date,
+            end_date=end_date,
+            days=days if not start_date and not end_date else None,
+            max_results=max_results,
+            search_depth="advanced",
+            include_domains=None,  # 不限制域名，获取更广泛的天气新闻
+        )
