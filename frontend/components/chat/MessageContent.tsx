@@ -292,6 +292,18 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // 变点悬浮状态
   const [activeChangePoint, setActiveChangePoint] = useState<any>(null)
 
+  // Trend Algorithm State
+  const [trendAlgo, setTrendAlgo] = useState('semantic')
+
+  // Filter Zones for Chart
+  const visibleZones = useMemo(() => {
+    if (!anomalyZones || anomalyZones.length === 0) return [];
+    return anomalyZones.filter((z: any) => {
+      if (trendAlgo === 'all') return true;
+      return (z.method || 'plr') === trendAlgo || (trendAlgo === 'semantic' && z.zone_type === 'semantic_regime');
+    });
+  }, [anomalyZones, trendAlgo]);
+
   // 从URL恢复新闻侧栏状态（仅在ticker可用时）
   useEffect(() => {
     if (!ticker) return;
@@ -737,9 +749,28 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         />
       )}
       <div className="flex items-center justify-between mb-3">
-        {shouldShowTitle && (
-          <h4 className="text-sm font-medium text-gray-300">{title}</h4>
-        )}
+        <div className="flex items-center gap-2">
+          {shouldShowTitle && (
+            <h4 className="text-sm font-medium text-gray-300">{title}</h4>
+          )}
+          {/* Trend Algo Selector for Chart */}
+          {anomalyZones && anomalyZones.length > 0 && (
+            <div className="flex items-center bg-dark-600/50 rounded p-0.5 border border-gray-700/50">
+              <button
+                onClick={() => setTrendAlgo('plr')}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-all ${trendAlgo === 'plr' ? 'bg-violet-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                Raw
+              </button>
+              <button
+                onClick={() => setTrendAlgo('semantic')}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-all ${trendAlgo === 'semantic' ? 'bg-violet-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                Semantic
+              </button>
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {isZoomed && (
             <>
@@ -850,12 +881,13 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               wrapperStyle={{ fontSize: '12px' }}
             />
             {/* 异常区域与悬浮提示 - Bloomberg风格 */}
-            {anomalyZones && anomalyZones.map((zone: any, idx: number) => {
+            {visibleZones && visibleZones.map((zone: any, idx: number) => {
               // A股配色：红涨绿跌
               const isPositive = (zone.avg_return || 0) >= 0
+              const isRaw = trendAlgo === 'plr'
               const zoneColor = isPositive
-                ? { fill: 'rgba(239, 68, 68, 0.04)', stroke: '#ef4444' }  // 红色=上涨
-                : { fill: 'rgba(34, 197, 94, 0.04)', stroke: '#22c55e' }   // 绿色=下跌
+                ? { fill: isRaw ? 'none' : 'rgba(239, 68, 68, 0.15)', stroke: '#ef4444' }  // 红色=上涨
+                : { fill: isRaw ? 'none' : 'rgba(34, 197, 94, 0.15)', stroke: '#22c55e' }   // 绿色=下跌
 
               const impact = zone.impact || 0.5
               const isCalm = zone.zone_type === 'calm'
