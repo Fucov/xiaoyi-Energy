@@ -25,7 +25,6 @@ class ReportAgent(BaseAgent):
 5. 逻辑清晰，层层递进
 6. 明确风险点，给出实用建议（如供电保障措施、需求侧管理等）"""
 
-
     def generate_streaming(
         self,
         user_question: str,
@@ -33,7 +32,7 @@ class ReportAgent(BaseAgent):
         forecast_result: Dict[str, Any],
         sentiment_result: Optional[Dict[str, Any]] = None,
         conversation_history: Optional[List[Dict[str, str]]] = None,
-        on_chunk: Optional[callable] = None
+        on_chunk: Optional[callable] = None,
     ) -> str:
         """
         流式生成分析报告
@@ -50,7 +49,9 @@ class ReportAgent(BaseAgent):
             完整报告内容
         """
         try:
-            prompt = self._build_prompt(user_question, features, forecast_result, sentiment_result)
+            prompt = self._build_prompt(
+                user_question, features, forecast_result, sentiment_result
+            )
         except (ValueError, TypeError) as e:
             prompt = f"数据分析请求: {user_question}\n数据详情: {str(features)}\n预测详情: {str(forecast_result)}"
 
@@ -58,7 +59,7 @@ class ReportAgent(BaseAgent):
             user_content=prompt,
             system_prompt=self.SYSTEM_PROMPT,
             conversation_history=conversation_history,
-            history_window=5
+            history_window=5,
         )
 
         content = self.call_llm(messages, stream=True, on_chunk=on_chunk)
@@ -69,7 +70,7 @@ class ReportAgent(BaseAgent):
         user_question: str,
         features: Dict[str, Any],
         forecast_result: Dict[str, Any],
-        sentiment_result: Optional[Dict[str, Any]] = None
+        sentiment_result: Optional[Dict[str, Any]] = None,
     ) -> str:
         """构建报告生成 prompt"""
         forecast_summary = forecast_result.get("forecast", [])
@@ -115,20 +116,20 @@ class ReportAgent(BaseAgent):
 """
 
         # 3. 构建主 Prompt
-        f_latest = float(features.get('latest', 0))
-        f_mean = float(features.get('mean', 1))
+        f_latest = float(features.get("latest", 0))
+        f_mean = float(features.get("mean", 1))
         change_pct = (f_latest - f_mean) / f_mean * 100
 
         prompt = f"""用户问题: {user_question}
 
 ## 数据特征分析
-数据时间范围为{features.get('date_range', '未知')}，共包含{features.get('data_points', 0)}个有效数据点。供电需求在{float(features.get('min', 0)):.2f}MW至{float(features.get('max', 0)):.2f}MW区间内波动，当前需求为**{f_latest:.2f}MW**，略{'高于' if change_pct > 0 else '低于' if change_pct < 0 else '等于'}均值{f_mean:.2f}MW（偏离幅度{abs(change_pct):.2f}%）。
+数据时间范围为{features.get("date_range", "未知")}，共包含{features.get("data_points", 0)}个有效数据点。供电需求在{float(features.get("min", 0)):.2f}MW至{float(features.get("max", 0)):.2f}MW区间内波动，当前需求为**{f_latest:.2f}MW**，略{"高于" if change_pct > 0 else "低于" if change_pct < 0 else "等于"}均值{f_mean:.2f}MW（偏离幅度{abs(change_pct):.2f}%）。
 
-从趋势分析来看，趋势方向为**{features.get('trend', '横盘')}**，波动程度为**{features.get('volatility', '低')}**，整体呈现出相对稳定的需求特征。
+从趋势分析来看，趋势方向为**{features.get("trend", "横盘")}**，波动程度为**{features.get("volatility", "低")}**，整体呈现出相对稳定的需求特征。
 
 {sentiment_section}
 ## 预测结果
-采用**{str(forecast_result.get('model', 'unknown')).upper()}模型**进行预测，模型的历史回测精度为MAE={float(forecast_result.get('metrics', {}).get('mae', 0)):.4f}，预测期限为{len(forecast_summary)}天。
+采用**{str(forecast_result.get("model", "unknown")).upper()}模型**进行预测，模型的历史回测精度为MAE={float(forecast_result.get("metrics", {}).get("mae", 0)):.4f}，预测期限为{len(forecast_summary)}天。
 
 根据预测结果，短期（7天）内预计变化为{short_term_change:+.2f}MW（{st_pct:+.2f}%），长期（{len(forecast_summary)}天）累计变化为{long_term_change:+.2f}MW（{lt_pct:+.2f}%）。
 

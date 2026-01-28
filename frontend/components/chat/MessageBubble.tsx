@@ -15,9 +15,9 @@ interface MessageBubbleProps {
 }
 
 // 多因素影响力轴组件
-function MultiFactorInfluenceAxis({ 
-  influenceData 
-}: { 
+function MultiFactorInfluenceAxis({
+  influenceData
+}: {
   influenceData: {
     temperature_influence?: number
     humidity_influence?: number
@@ -37,28 +37,28 @@ function MultiFactorInfluenceAxis({
   }
 
   const factors = [
-    { 
-      label: '温度影响', 
+    {
+      label: '温度影响',
       value: influenceData.temperature_influence ?? 0.5,
       color: 'bg-cyan-400'
     },
-    { 
-      label: '湿度影响', 
+    {
+      label: '湿度影响',
       value: influenceData.humidity_influence ?? 0.3,
       color: 'bg-purple-400'
     },
-    { 
-      label: '季节性', 
+    {
+      label: '季节性',
       value: influenceData.seasonality_influence ?? 0.4,
       color: 'bg-purple-400'
     },
-    { 
-      label: '趋势强度', 
+    {
+      label: '趋势强度',
       value: influenceData.trend_influence ?? 0.6,
       color: 'bg-orange-400'
     },
-    { 
-      label: '波动性', 
+    {
+      label: '波动性',
       value: influenceData.volatility_influence ?? 0.3,
       color: 'bg-green-400'
     },
@@ -361,12 +361,12 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                   t.type === 'text' && !t.text.startsWith('__EMOTION_MARKER__') && !t.text.startsWith('__INFLUENCE_MARKER__')
                 ).pop() // 取最后一个文本作为报告
 
-                // 识别价格走势图表（包含"历史价格"或"预测价格"）
+                // 识别供电量走势图表（包含"历史供电量"或"预测供电量"）
                 const priceChart = charts.find(c =>
                   c.type === 'chart' && (
                     c.title?.includes('预测') ||
                     c.title?.includes('走势') ||
-                    c.data.datasets.some(d => d.label?.includes('价格'))
+                    c.data.datasets.some(d => d.label?.includes('供电量'))
                   )
                 )
 
@@ -388,18 +388,26 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                   description?: string
                 } | null = null
                 let emotionData: { score: number; description: string } | null = null
-                
+
                 if (emotionText && emotionText.type === 'text') {
                   console.log('[MessageBubble] Found emotionText:', emotionText.text.substring(0, 100))
                   // 优先解析影响因子数据
                   const influenceMatch = emotionText.text.match(/__INFLUENCE_MARKER__([\s\S]*)__/)
                   if (influenceMatch) {
-                    console.log('[MessageBubble] Matched INFLUENCE_MARKER, parsing JSON...')
+                    // console.log('[MessageBubble] Matched INFLUENCE_MARKER, parsing JSON...')
                     try {
                       influenceData = JSON.parse(influenceMatch[1])
-                      console.log('[MessageBubble] Parsed influence data:', influenceData)
+                      // console.log('[MessageBubble] Parsed influence data:', influenceData)
                     } catch (e) {
                       console.error('[MessageBubble] Failed to parse influence data:', e, 'Raw match:', influenceMatch[1])
+                    }
+                  } else if (emotionText.text.startsWith('__INFLUENCE_MARKER__')) {
+                    // Fallback: try to substring if regex fails
+                    try {
+                      const jsonStr = emotionText.text.replace('__INFLUENCE_MARKER__', '').replace(/__$/, '')
+                      influenceData = JSON.parse(jsonStr)
+                    } catch (e) {
+                      console.error('[MessageBubble] Fallback parsing failed:', e)
                     }
                   } else {
                     // 兼容旧的情绪数据格式
@@ -496,10 +504,10 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                       </div>
                     </div>
 
-                    {/* 价格预测趋势图（全宽） */}
+                    {/* 供电量预测趋势图（全宽） */}
                     <div className="glass rounded-2xl p-4">
                       <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                        <span>📈</span> 价格走势分析
+                        <span>📈</span> 供电量走势分析
                       </h3>
                       {priceChart ? (
                         <MessageContent content={priceChart} />

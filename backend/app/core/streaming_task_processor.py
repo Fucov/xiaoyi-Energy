@@ -31,6 +31,7 @@ from app.services.stock_matcher import get_stock_matcher  # 保留以兼容
 from app.services.region_matcher import get_region_matcher
 from app.services.rag_client import check_rag_availability
 from app.services.influence_analyzer import InfluenceAnalyzer
+from app.services.stock_signal_service import StockSignalService
 
 # Agents
 from app.agents import (
@@ -39,12 +40,14 @@ from app.agents import (
     ErrorExplainerAgent,
     SentimentAgent,
     NewsSummaryAgent,
+    PredictionAnalysisAgent,
 )
 
 # Data clients
 from app.data.rag_searcher import RAGSearcher
 
 # Data & Models
+from app.data import extract_domain
 from app.data.fetcher import DataFetchError
 from app.models import TimeSeriesAnalyzer
 
@@ -54,6 +57,7 @@ from app.core.workflows import (
     fetch_news_all,
     fetch_rag_reports,
     search_web,
+    search_news_around_date,
     fetch_domain_news,
     run_forecast,
     df_to_points,
@@ -89,6 +93,7 @@ class StreamingTaskProcessor:
         self.news_summary_agent = NewsSummaryAgent()
         self.stock_matcher = get_stock_matcher()  # 保留以兼容
         self.region_matcher = get_region_matcher()
+        self.prediction_analysis_agent = PredictionAnalysisAgent()
         self.redis = get_redis()
 
     async def execute_streaming(
@@ -200,7 +205,7 @@ class StreamingTaskProcessor:
 
             # 优先使用region_mention，如果没有则使用stock_mention（兼容旧数据）
             region_mention = intent.region_mention or intent.stock_mention
-            
+
             if region_mention:
                 await self._emit_event(
                     event_queue,
@@ -208,7 +213,9 @@ class StreamingTaskProcessor:
                     {"type": "step_start", "step": 2, "step_name": "区域验证"},
                 )
 
-                query_name = intent.region_name or intent.stock_full_name or region_mention
+                query_name = (
+                    intent.region_name or intent.stock_full_name or region_mention
+                )
                 message.update_step_detail(2, "running", f"验证区域: {query_name}")
 
                 region_match_result = await asyncio.to_thread(
@@ -239,8 +246,12 @@ class StreamingTaskProcessor:
                         "type": "step_complete",
                         "step": 2,
                         "data": {
-                            "region_code": region_info.region_code if region_info else "",
-                            "region_name": region_info.region_name if region_info else "",
+                            "region_code": region_info.region_code
+                            if region_info
+                            else "",
+                            "region_name": region_info.region_name
+                            if region_info
+                            else "",
                         },
                     },
                 )
@@ -390,14 +401,12 @@ class StreamingTaskProcessor:
         # 同时确保有足够的数据用于模型训练
         effective_history_days = min(intent.history_days, 92)
         effective_history_days = max(effective_history_days, 30)  # 至少30天用于训练
-        
+
         # 使用北京时区确保一致性
         BEIJING_TZ = ZoneInfo("Asia/Shanghai")
         now = datetime.now(BEIJING_TZ)
         end_date = now.strftime("%Y%m%d")
-        start_date = (now - timedelta(days=effective_history_days)).strftime(
-            "%Y%m%d"
-        )
+        start_date = (now - timedelta(days=effective_history_days)).strftime("%Y%m%d")
 
         # 并行获取数据
         power_data_task = asyncio.create_task(
@@ -453,7 +462,9 @@ class StreamingTaskProcessor:
                 weather_df = None
 
         if df is None or df.empty:
-            error_msg = f"无法获取 {region_name} 的历史供电需求数据，请检查区域名称是否正确。"
+            error_msg = (
+                f"无法获取 {region_name} 的历史供电需求数据，请检查区域名称是否正确。"
+            )
             message.save_conclusion(error_msg)
             message.update_step_detail(3, "error", "数据获取失败")
             news_task.cancel()
@@ -541,19 +552,11 @@ class StreamingTaskProcessor:
                 }
             )
 
-            # 构建新闻计数字典（按日期）
+            # === 改动：不依赖新闻接口 ===
+            # 构建新闻计数字典（强制为空，不使用 summarise_news）
+            # The user requested to remove news interface dependency for detection.
             news_counts = {}
-            for news_item in summarized_news or []:
-                try:
-                    date_key = (
-                        news_item.published_date[:10]
-                        if news_item.published_date
-                        else None
-                    )
-                    if date_key:
-                        news_counts[date_key] = news_counts.get(date_key, 0) + 1
-                except Exception as e:
-                    pass
+            # for news_item in summarized_news or []: ... (Removed)
 
             # === Redis 全局缓存检查 ===
             redis_client = get_redis()
@@ -570,137 +573,87 @@ class StreamingTaskProcessor:
                         f"[AnomalyZones] ✓ Using Redis cached {len(anomaly_zones)} zones for {region_code}"
                     )
             except Exception as e:
-                print(f"[AnomalyZones] Redis cache read error: {e}")
-                cached_zones_json = None
+                print(f"[AnomalyZones] Failed to get Redis client or cache: {e}")
 
             # 如果缓存不存在，计算并保存
             if not cached_zones_json:
-                # 使用动态聚类服务 (Merged into StockSignalService)
+                # 使用动态聚类服务
                 clustering_service = StockSignalService(lookback=60, max_zone_days=10)
                 anomaly_zones = clustering_service.generate_zones(sig_df, news_counts)
 
-                print(
-                    f"[AnomalyZones] ⚙️ Generated {len(anomaly_zones)} zones: {[z['zone_type'] for z in anomaly_zones]}"
-                )
+                print(f"[AnomalyZones] ⚙️ Generated {len(anomaly_zones)} zones")
 
-            # 为每个区域生成事件摘要（仅当不是从缓存读取时）
+            # 为每个区域生成事件摘要（即使是从缓存读取的也可以重新生成，或者仅当未缓存时生成）
             if anomaly_zones and not cached_zones_json:
                 try:
                     event_agent = EventSummaryAgent()
 
-                    # 导入MongoDB client（从stock_db.py）
-                    from app.data.stock_db import get_mongo_client
+                    # 并发处理每个Zone的搜索总结 (Search REMOVED as per user request)
+                    async def process_zone(zone):
+                        start = zone["startDate"]
+                        end = zone["endDate"]
 
-                    mongo_client = None
+                        zone_dates = []
+                        curr = datetime.strptime(start, "%Y-%m-%d")
+                        while curr <= datetime.strptime(end, "%Y-%m-%d"):
+                            zone_dates.append(curr.strftime("%Y-%m-%d"))
+                            curr += timedelta(days=1)
 
-                    try:
-                        mongo_client = get_mongo_client()
-                        # 使用环境变量配置数据库和集合名称
-                        db_name = os.getenv("MONGODB_DATABASE", "EastMoneyGubaNews")
-                        collection_name = os.getenv("MONGODB_COLLECTION", "stock_news")
-                        news_collection = mongo_client[db_name][collection_name]
+                        # 改动：不再调用 Tavily 搜索新闻供摘要使用
 
-                        for zone in anomaly_zones:
-                            start = zone["startDate"]
-                            end = zone["endDate"]
+                        # 生成摘要
+                        event_summary = event_agent.summarize_zone(
+                            zone_dates=zone_dates,
+                            price_change=zone.get("avg_return", 0) * 100,
+                            news_items=[],  # EMPTY
+                            region_name=region_name,
+                        )
 
-                            # 使用正则表达式查询区域内的新闻
-                            zone_dates = []
-                            current = datetime.strptime(start, "%Y-%m-%d")
-                            end_dt = datetime.strptime(end, "%Y-%m-%d")
-                            while current <= end_dt:
-                                zone_dates.append(current.strftime("%Y-%m-%d"))
-                                current += timedelta(days=1)
+                        zone["event_summary"] = event_summary
+                        # 改动：不在 anomaly zones 中保存 url，因为不获取新闻了
+                        zone["news_links"] = []
 
-                            # 从MongoDB查询这些日期的所有内容（资讯、研报、公告）
-                            regex_pattern = "^(" + "|".join(zone_dates) + ")"
-                            zone_news_cursor = news_collection.find(
-                                {
-                                    "region_code": region_code,  # 使用region_code替代stock_code
-                                    "publish_time": {"$regex": regex_pattern},
-                                    # 不过滤content_type，包含所有类型
-                                }
-                            ).limit(20)  # 增加到20条以覆盖更多内容类型
+                        print(
+                            f"[AnomalyZones] Zone {start}-{end} (Internal Analysis): {event_summary}"
+                        )
+                        return zone
 
-                            zone_news_dicts = []
-                            for news_doc in zone_news_cursor:
-                                zone_news_dicts.append(
-                                    {
-                                        "title": news_doc.get("title", ""),
-                                        "content_type": news_doc.get(
-                                            "content_type", "资讯"
-                                        ),
-                                        "publish_time": news_doc.get(
-                                            "publish_time", ""
-                                        ),
-                                    }
-                                )
-
-                            # 使用Agent生成摘要
-                            event_summary = event_agent.summarize_zone(
-                                zone_dates=zone_dates,
-                                price_change=zone["avg_return"] * 100,
-                                news_items=zone_news_dicts,
-                            )
-
-                            zone["event_summary"] = event_summary
-                            print(
-                                f"[AnomalyZones] Zone {start}-{end} ({len(zone_news_dicts)} news): {event_summary}"
-                            )
-
-                    finally:
-                        if mongo_client:
-                            mongo_client.close()
+                    # 并发执行
+                    tasks = [process_zone(z) for z in anomaly_zones]
+                    anomaly_zones = await asyncio.gather(*tasks)
 
                 except Exception as e:
                     import traceback
 
                     print(f"[AnomalyZones] Error generating event summaries: {e}")
-                    print(f"[AnomalyZones] Traceback: {traceback.format_exc()}")
-                    # Fallback: 使用简单摘要
+                    print(traceback.format_exc())
+                    # Fallback
                     for zone in anomaly_zones:
                         if "event_summary" not in zone:
                             zone["event_summary"] = (
-                                f"价格变化{zone.get('avg_return', 0) * 100:+.1f}%"
+                                f"供电量波动{zone.get('avg_return', 0) * 100:+.1f}%"
                             )
 
-            # 过滤掉没有新闻的zones（仅当不是从缓存读取时）
-            if not cached_zones_json:
-                anomaly_zones_with_news = []
-                for zone in anomaly_zones:
-                    # 检查是否有新闻（通过event_summary判断，包含"股价"说明没有新闻）
-                    if (
-                        zone.get("event_summary")
-                        and not zone["event_summary"].startswith("股价")
-                        and not zone["event_summary"].startswith("价格")
-                    ):
-                        anomaly_zones_with_news.append(zone)
-                    else:
-                        print(
-                            f"[AnomalyZones] Filtered out zone {zone['startDate']}-{zone['endDate']} (no news)"
-                        )
+            # ⚠️ 不再过滤无新闻的 zones，保留所有检测到的异常区间
+            anomaly_zones_with_news = anomaly_zones
+            print(f"[AnomalyZones] Final zones: {len(anomaly_zones)}")
 
-                anomaly_zones = anomaly_zones_with_news
-                print(
-                    f"[AnomalyZones] After filtering: {len(anomaly_zones)} zones with news"
-                )
+            # === 保存到Redis全局缓存 ===
+            if anomaly_zones:
+                try:
+                    import json
 
-                # === 保存到Redis全局缓存 ===
-                if anomaly_zones:
-                    try:
-                        import json
-
-                        zones_json = json.dumps(anomaly_zones, ensure_ascii=False)
-                        redis_client.setex(
-                            cache_key,
-                            12 * 60 * 60,  # 12小时TTL
-                            zones_json,
-                        )
-                        print(
-                            f"[AnomalyZones] 💾 Saved {len(anomaly_zones)} zones to Redis cache (12 hours)"
-                        )
-                    except Exception as e:
-                        print(f"[AnomalyZones] Redis cache save error: {e}")
+                    zones_json = json.dumps(anomaly_zones, ensure_ascii=False)
+                    redis_client.setex(
+                        cache_key,
+                        12 * 60 * 60,  # 12小时TTL
+                        zones_json,
+                    )
+                    print(
+                        f"[AnomalyZones] 💾 Saved {len(anomaly_zones)} zones to Redis cache (12 hours)"
+                    )
+                except Exception as e:
+                    print(f"[AnomalyZones] Redis cache save error: {e}")
 
             # 保存并发送异常区域数据
             if anomaly_zones:
@@ -748,7 +701,9 @@ class StreamingTaskProcessor:
         features = await asyncio.to_thread(TimeSeriesAnalyzer.analyze_features, df)
 
         # 多因素影响力分析（替代情绪分析）
-        print(f"[Influence] 准备分析影响因子，供电数据: {len(df) if df is not None else 0} 条，天气数据: {len(weather_df) if weather_df is not None else 0} 条")
+        print(
+            f"[Influence] 准备分析影响因子，供电数据: {len(df) if df is not None else 0} 条，天气数据: {len(weather_df) if weather_df is not None else 0} 条"
+        )
         influence_result = await self._step_influence_analysis(
             df, weather_df, event_queue, message
         )
@@ -756,8 +711,8 @@ class StreamingTaskProcessor:
 
         # 保存影响因子数据（兼容原有emotion字段）
         message.save_emotion(
-            influence_result.get("overall_score", 0), 
-            influence_result.get("description", "影响因素分析")
+            influence_result.get("overall_score", 0),
+            influence_result.get("description", "影响因素分析"),
         )
 
         await self._emit_event(
@@ -796,7 +751,7 @@ class StreamingTaskProcessor:
         BEIJING_TZ = ZoneInfo("Asia/Shanghai")
         if last_date.tzinfo is None:
             last_date = last_date.replace(tzinfo=BEIJING_TZ)
-        
+
         target_date_from_start = last_date + timedelta(days=90)
         # print(f"[ModelSelection] 目标日期从开始: {target_date_from_start}")
         # 确保target_date_to_today也是timezone-aware的
@@ -810,7 +765,7 @@ class StreamingTaskProcessor:
         # 模型选择：Demo模式 - 为了轻量化展示，默认使用Prophet模型
         # 跳过复杂的模型选择过程，直接使用Prophet
         user_specified_model = intent.forecast_model
-        
+
         # Demo模式：默认使用Prophet，跳过复杂的模型选择过程
         if not user_specified_model or user_specified_model == "auto":
             final_model = "prophet"
@@ -818,8 +773,10 @@ class StreamingTaskProcessor:
         else:
             # 用户指定了模型，使用用户指定的模型
             final_model = user_specified_model
-            model_selection_reason = f"使用用户指定的 {user_specified_model.upper()} 模型"
-        
+            model_selection_reason = (
+                f"使用用户指定的 {user_specified_model.upper()} 模型"
+            )
+
         # 发送模型选择事件（简化版）
         await self._emit_event(
             event_queue,
@@ -837,16 +794,12 @@ class StreamingTaskProcessor:
         )
 
         # 保存模型选择信息到 Message
-        message.save_model_selection(
-            final_model, {}, False
-        )
+        message.save_model_selection(final_model, {}, False)
 
         # 保存模型选择原因
         message.save_model_selection_reason(model_selection_reason)
 
-        message.update_step_detail(
-            5, "running", f"训练 {final_model.upper()} 模型..."
-        )
+        message.update_step_detail(5, "running", f"训练 {final_model.upper()} 模型...")
 
         prophet_params = await recommend_forecast_params(
             self.sentiment_agent, influence_result or {}, features
@@ -891,6 +844,174 @@ class StreamingTaskProcessor:
 
         # 保存模型名称到 MessageData（使用最终选定的模型）
         message.save_model_name(final_model)
+
+        # === Change Point Detection & Analysis (Separated History / Forecast) ===
+        try:
+            # 1. 准备数据：分离历史和预测
+            hist_points = [p for p in full_points if not p.is_prediction]
+            pred_points = [p for p in full_points if p.is_prediction]
+
+            # 如果预测点不足，可能是纯历史分析或预测未开始
+            if not pred_points and len(hist_points) > 0:
+                # 假设最后一部分是其实是未来预测（针对某些特殊case），或者干脆不检测未来
+                pass
+
+            import pandas as pd
+
+            # 定义检测函数，方便复用
+            def run_detection(points, label, threshold):
+                if not points:
+                    return []
+                df = pd.DataFrame(
+                    [
+                        {"date": p.date, "y": p.value, "is_prediction": p.is_prediction}
+                        for p in points
+                    ]
+                )
+                print(
+                    f"[ChangePoints] Starting detection for {region_name} on {label} data ({len(df)} rows)"
+                )
+                # 必须重新索引，否则索引会不连续影响检测逻辑（如果detect内部依赖索引连续性）
+                df = df.reset_index(drop=True)
+
+                srv = StockSignalService()
+                return srv.detect_change_points(df, threshold=threshold)
+
+            # 分别检测
+            # 历史数据通常噪声较大，可以使用稍高阈值；或者保持一致
+            hist_cps = run_detection(hist_points, "HISTORY", threshold=1.3)
+            for cp in hist_cps:
+                cp["is_prediction"] = False
+
+            # 预测数据通常较平滑，阈值可低一点以敏感捕捉
+            pred_cps = run_detection(pred_points, "FORECAST", threshold=1.2)
+            for cp in pred_cps:
+                cp["is_prediction"] = True
+
+            all_change_points = hist_cps + pred_cps
+            print(
+                f"[ChangePoints] Total detected: {len(all_change_points)} (Hist: {len(hist_cps)}, Pred: {len(pred_cps)})"
+            )
+
+            if all_change_points:
+                analyzed_points = []
+
+                # 预处理天气数据查找表
+                weather_lookup = {}
+                if weather_df is not None and not weather_df.empty:
+                    try:
+                        weather_df["date_str"] = (
+                            weather_df["date"].astype(str).str.slice(0, 10)
+                        )
+                        for _, row in weather_df.iterrows():
+                            temp = f"{row.get('temperature', 'N/A')}°C"
+                            hum = f"湿度{row.get('humidity', 'N/A')}%"
+                            weather_lookup[row["date_str"]] = f"{temp}, {hum}"
+                    except Exception as e:
+                        print(f"[ChangePoints] Weather lookup build error: {e}")
+
+                # 异步搜索工具函数
+                async def enrich_point(cp):
+                    cp_date = cp.get("date")
+                    is_pred = cp.get("is_prediction", False)
+
+                    # 2. 上下文构建
+                    context_info = []
+                    w_info = weather_lookup.get(cp_date)
+                    if w_info:
+                        context_info.append(f"天气: {w_info}")
+
+                    if is_pred:
+                        context_info.append("(未来预测)")
+                    else:
+                        context_info.append("(历史数据)")
+
+                    weather_info_str = " ".join(context_info)
+
+                    # 3. 并行执行：LLM分析 + Tavily搜索
+
+                    # LLM 分析任务
+                    llm_task = asyncio.to_thread(
+                        self.prediction_analysis_agent.analyze_change_point,
+                        cp,
+                        region_name,
+                        weather_info_str,
+                    )
+
+                    # Tavily 搜索任务 (仅对历史点或近期未来点更有意义)
+                    search_task = None
+                    if not is_pred:  # 历史数据才搜索新闻
+                        keywords = [region_name, "供电", "天气", "工业"]
+                        # 使用特定日期的搜索
+                        search_task = search_news_around_date(
+                            keywords, target_date=cp_date, days=3, max_results=3
+                        )
+
+                    # 执行任务
+                    analysis_res, search_res = await asyncio.gather(
+                        llm_task,
+                        search_task if search_task else asyncio.sleep(0),
+                        return_exceptions=True,
+                    )
+
+                    # 处理结果
+                    cp["reason"] = (
+                        analysis_res if isinstance(analysis_res, str) else "分析失败"
+                    )
+
+                    # 处理搜索结果
+                    news_links = []
+                    if isinstance(search_res, list):
+                        for item in search_res:
+                            news_links.append(
+                                {
+                                    "title": item.get("title", f"相关新闻 ({cp_date})"),
+                                    "url": item.get("url", "#"),
+                                    "source": extract_domain(item.get("url", "")),
+                                }
+                            )
+                    cp["news_links"] = news_links
+
+                    # 构建天气链接 (通用搜索链接)
+                    weather_query = f"{region_name} {cp_date} 天气"
+                    cp["weather_link"] = (
+                        f"https://www.bing.com/search?q={weather_query}"
+                    )
+
+                    return cp
+
+                    cp["is_prediction"] = is_pred
+
+                    return cp
+
+                # 并发处理所有点
+                # 限制并发数以防触发API速率限制
+                limit = asyncio.Semaphore(5)
+
+                async def sem_task(cp):
+                    async with limit:
+                        return await enrich_point(cp)
+
+                tasks = [sem_task(cp) for cp in all_change_points]
+                analyzed_points = await asyncio.gather(*tasks)
+
+                # Emit event
+                await self._emit_event(
+                    event_queue,
+                    message,
+                    {
+                        "type": "data",
+                        "data_type": "change_points",
+                        "data": analyzed_points,
+                    },
+                )
+                message.save_change_points(analyzed_points)
+
+        except Exception as e:
+            print(f"❌ Change Point Analysis Error: {e}")
+            import traceback
+
+            print(traceback.format_exc())
 
         # === Step 6: 报告生成（流式） ===
         await self._emit_event(
@@ -1117,7 +1238,7 @@ class StreamingTaskProcessor:
         message: Message,
     ) -> Dict[str, Any]:
         """多因素影响力分析（替代情绪分析）"""
-        
+
         # 如果没有天气数据，返回默认值
         if weather_df is None or weather_df.empty:
             default_result = {
@@ -1127,7 +1248,7 @@ class StreamingTaskProcessor:
                 "trend_influence": 0.6,
                 "volatility_influence": 0.3,
                 "overall_score": 0.0,
-                "description": "天气数据不足，使用默认影响因子"
+                "description": "天气数据不足，使用默认影响因子",
             }
             print(f"[Influence] 天气数据为空，发送默认影响因子: {default_result}")
             await self._emit_event(
@@ -1140,25 +1261,23 @@ class StreamingTaskProcessor:
                 },
             )
             return default_result
-        
+
         # 计算影响因子
         influence_result = await asyncio.to_thread(
-            InfluenceAnalyzer.analyze_weather_influence,
-            power_df,
-            weather_df
+            InfluenceAnalyzer.analyze_weather_influence, power_df, weather_df
         )
-        
+
         # 计算总体得分（各因素的平均值）
         overall_score = (
-            influence_result.get("temperature_influence", 0) +
-            influence_result.get("humidity_influence", 0) +
-            influence_result.get("seasonality_influence", 0) +
-            influence_result.get("trend_influence", 0) +
-            influence_result.get("volatility_influence", 0)
+            influence_result.get("temperature_influence", 0)
+            + influence_result.get("humidity_influence", 0)
+            + influence_result.get("seasonality_influence", 0)
+            + influence_result.get("trend_influence", 0)
+            + influence_result.get("volatility_influence", 0)
         ) / 5
-        
+
         influence_result["overall_score"] = round(overall_score, 2)
-        
+
         # 发送影响因子数据
         print(f"[Influence] 发送影响因子数据: {influence_result}")
         await self._emit_event(
@@ -1171,7 +1290,7 @@ class StreamingTaskProcessor:
             },
         )
         print(f"[Influence] 影响因子数据已发送")
-        
+
         return influence_result
 
     # ========== 流式情绪分析（保留以兼容）==========
