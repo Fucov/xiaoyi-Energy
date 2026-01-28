@@ -2,21 +2,21 @@ services:
   # ===== Redis 服务 =====
   redis:
     image: aqtbrodh2awvkc.xuanyuan.run/redis:7-alpine
-    container_name: xiaoyi-redis
+    container_name: xiaoyi-energy-redis
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      - "6380:6380"
     volumes:
       - redis_data:/data
-    command: redis-server --appendonly yes
+    command: redis-server --port 6380 --appendonly yes
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-p", "6380", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
     networks:
-      - xiaoyi-network
+      - xiaoyi-energy-network
 
   # ===== 前端服务 =====
   frontend:
@@ -24,33 +24,33 @@ services:
       context: .
       dockerfile: frontend/Dockerfile
       args:
-        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:18000}
-    container_name: xiaoyi-frontend
+        - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:18001}
+    container_name: xiaoyi-energy-frontend
     restart: unless-stopped
     ports:
-      - "13000:3000"
+      - "13001:3000"
     environment:
       - NODE_ENV=production
     depends_on:
       backend:
         condition: service_healthy
     networks:
-      - xiaoyi-network
+      - xiaoyi-energy-network
 
   # ===== 后端服务 =====
   backend:
     build:
       context: .
       dockerfile: backend/Dockerfile
-    container_name: xiaoyi-backend
+    container_name: xiaoyi-energy-backend
     restart: unless-stopped
     ports:
-      - "18000:8000"
+      - "18001:8000"
     environment:
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - TAVILY_API_KEY=${TAVILY_API_KEY}
       - REDIS_HOST=redis
-      - REDIS_PORT=6379
+      - REDIS_PORT=6380
       - REDIS_DB=0
       - TZ=Asia/Shanghai
       # 外部 RAG 服务
@@ -69,10 +69,10 @@ services:
       retries: 3
       start_period: 40s
     networks:
-      - xiaoyi-network
+      - xiaoyi-energy-network
 
 networks:
-  xiaoyi-network:
+  xiaoyi-energy-network:
     driver: bridge
 
 volumes:

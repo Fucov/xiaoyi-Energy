@@ -338,7 +338,12 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
 
         setMessages((prev: Message[]) => prev.map((msg: Message) =>
           msg.id === assistantMessageId
-            ? { ...msg, steps }
+            ? {
+                ...msg,
+                steps,
+                // 🔧 修复：收到 step_start 事件说明是预测流程，确保 renderMode 是 forecast
+                renderMode: 'forecast' as RenderMode
+              }
             : msg
         ))
       },
@@ -792,10 +797,10 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     }
 
     // 结构化回答：根据当前步骤生成内容（只显示已完成步骤的内容）
-    // 后端 6 步：1-意图识别, 2-股票验证, 3-数据获取, 4-分析处理, 5-模型预测, 6-报告生成
+    // 后端 6 步：1-意图识别, 2-区域验证, 3-数据获取, 4-分析处理, 5-模型预测, 6-报告生成
     const isCompleted = status === 'completed' || currentStep >= 6
 
-    // 1. 市场情绪（步骤4"分析处理"完成后显示）
+    // 1. 影响因子分析（步骤4"分析处理"完成后显示）
     if (currentStep >= 4 || isCompleted) {
       // emotion_des 可能是空字符串，需要使用严格的 null/undefined 检查
       const hasValidEmotion = typeof data.emotion === 'number'
@@ -811,13 +816,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       } else if (isCompleted) {
         // 已完成但无数据，使用模拟数据
         const mockEmotion = Math.random() * 0.6 + 0.2 // 0.2 到 0.8 之间
-        const mockDescription = '市场情绪分析中，基于新闻和技术指标综合评估'
+        const mockDescription = '影响因子分析中，基于天气和历史数据综合评估'
         contents.push({
           type: 'text',
           text: `__EMOTION_MARKER__${mockEmotion}__${mockDescription}__`
         })
       }
-      // 如果步骤 < 5，不添加情绪内容（MessageBubble 会显示"情绪分析中..."）
+      // 如果步骤 < 5，不添加内容（MessageBubble 会显示"影响因素分析中..."）
     }
 
     // 2. 新闻列表表格（步骤3"数据获取"完成后显示）
@@ -1225,7 +1230,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
                 有什么可以帮忙的？
               </h3>
               <p className="text-gray-400 text-sm mb-8">
-                我可以帮你分析股票走势、预测市场趋势、生成投资报告等
+                我可以帮你分析供电趋势、预测用电需求、生成供电分析报告等
               </p>
               <div className="flex flex-col gap-3">
                 {quickSuggestions.map((suggestion, index) => (

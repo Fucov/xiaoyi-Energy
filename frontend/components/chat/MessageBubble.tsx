@@ -346,9 +346,9 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                           💡 使用建议
                         </h4>
                         <ul className="text-sm text-blue-200/80 space-y-1">
-                          <li>• 确认股票代码格式正确（A股为6位数字）</li>
-                          <li>• 可以尝试使用公司名称，如"贵州茅台"</li>
-                          <li>• 热门股票示例：600519（茅台）、000001（平安银行）</li>
+                          <li>• 请输入正确的区域名称，如"北京"、"上海"</li>
+                          <li>• 可以指定预测天数，如"预测北京未来30天供电需求"</li>
+                          <li>• 支持的区域示例：北京、上海、广州、深圳等</li>
                         </ul>
                       </div>
                     </div>

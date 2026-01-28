@@ -489,6 +489,14 @@ export async function resumeStream(
                 callbacks.onThinking?.(event.content || '')
                 break
 
+              case 'intent':
+                callbacks.onIntent?.(
+                  event.intent || '',
+                  event.is_forecast || false,
+                  event.reason || ''
+                )
+                break
+
               case 'data':
                 // console.log('[SSE] Data event - type:', event.data_type, 'data:', event.data)
                 callbacks.onData?.(

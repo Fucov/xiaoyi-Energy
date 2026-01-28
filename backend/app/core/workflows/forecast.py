@@ -6,6 +6,7 @@
 """
 
 import asyncio
+from typing import Optional
 import pandas as pd
 
 from app.models import (
@@ -22,7 +23,8 @@ async def _run_single_model_forecast(
     df: pd.DataFrame,
     model_name: str,
     horizon: int,
-    prophet_params: dict = None
+    prophet_params: dict = None,
+    weather_df: Optional[pd.DataFrame] = None
 ) -> ForecastResult:
     """
     运行单个预测模型（内部工具函数）
@@ -32,6 +34,7 @@ async def _run_single_model_forecast(
         model_name: 模型名称 (prophet/xgboost/randomforest/dlinear/seasonal_naive)
         horizon: 预测天数
         prophet_params: Prophet 模型参数（可选）
+        weather_df: 天气数据（可选，仅Prophet使用）
 
     Returns:
         ForecastResult: 预测结果对象
@@ -39,7 +42,7 @@ async def _run_single_model_forecast(
     if model_name == "prophet":
         forecaster = ProphetForecaster()
         return await asyncio.to_thread(
-            forecaster.forecast, df, horizon, prophet_params or {}
+            forecaster.forecast, df, horizon, prophet_params or {}, weather_df
         )
     elif model_name == "xgboost":
         forecaster = XGBoostForecaster()
@@ -59,8 +62,9 @@ async def run_forecast(
     df: pd.DataFrame,
     model: str,
     horizon: int,
-    prophet_params: dict = None
-) -> dict:
+    prophet_params: dict = None,
+    weather_df: Optional[pd.DataFrame] = None
+) -> ForecastResult:
     """
     运行预测模型
 
@@ -69,8 +73,9 @@ async def run_forecast(
         model: 模型名称 (prophet/xgboost/randomforest/dlinear)
         horizon: 预测天数
         prophet_params: Prophet 模型参数（可选）
+        weather_df: 天气数据（可选，仅Prophet使用）
 
     Returns:
-        预测结果字典，包含 forecast 和 metrics
+        ForecastResult: 预测结果
     """
-    return await _run_single_model_forecast(df, model, horizon, prophet_params)
+    return await _run_single_model_forecast(df, model, horizon, prophet_params, weather_df)

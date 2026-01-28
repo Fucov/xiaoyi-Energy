@@ -854,7 +854,7 @@ class StreamingTaskProcessor:
 
         # 只对最终选定的模型调用一次 run_forecast
         forecast_result = await run_forecast(
-            df, final_model, max(forecast_horizon, 1), prophet_params
+            df, final_model, max(forecast_horizon, 1), prophet_params, weather_df
         )
 
         # 保存并发送预测结果（forecast_result 是 ForecastResult 对象）
