@@ -11,7 +11,6 @@ import pandas as pd
 import numpy as np
 from .base import BaseForecaster
 from .analyzer import TimeSeriesAnalyzer
-from app.utils.trading_calendar import get_next_trading_days
 from app.schemas.session_schema import ForecastResult, ForecastMetrics, TimeSeriesPoint
 
 class RandomForestForecaster(BaseForecaster):
@@ -103,11 +102,8 @@ class RandomForestForecaster(BaseForecaster):
         last_date = df["ds"].iloc[-1]
         last_values = df["y"].values[-30:].tolist()
 
-        # 获取未来交易日（移到循环外，修复原 bug）
-        trading_days = get_next_trading_days(last_date, horizon)
-
         for i in range(horizon):
-            future_date = trading_days[i]
+            future_date = last_date + timedelta(days=i + 1)
 
             # 准备特征
             future_features = pd.Series(index=feature_df.columns, dtype=float)

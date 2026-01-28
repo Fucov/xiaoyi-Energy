@@ -26,18 +26,6 @@ const config: Config = {
           red: '#ef4444',
         }
       },
-      fontSize: {
-        // 最小字体 22px，基础字体 24px（Word 18号字）
-        'xs': ['22px', { lineHeight: '1.5' }],
-        'sm': ['22px', { lineHeight: '1.5' }],
-        'base': ['24px', { lineHeight: '1.6' }],
-        'lg': ['28px', { lineHeight: '1.5' }],
-        'xl': ['32px', { lineHeight: '1.4' }],
-        '2xl': ['40px', { lineHeight: '1.3' }],
-        '3xl': ['48px', { lineHeight: '1.2' }],
-        '4xl': ['56px', { lineHeight: '1.1' }],
-        '5xl': ['64px', { lineHeight: '1.1' }],
-      },
       fontFamily: {
         sans: [
           '-apple-system',

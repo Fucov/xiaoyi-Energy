@@ -126,14 +126,18 @@ async def _fetch_tavily_raw(
     end_date = datetime.now().strftime("%Y-%m-%d")
     start_date = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
 
-    client = TavilyNewsClient(settings.tavily_api_key)
-    return await asyncio.to_thread(
-        client.search_weather_news,
-        region_name=region_name,
-        start_date=start_date,
-        end_date=end_date,
-        max_results=max_results,
-    )
+    try:
+        client = TavilyNewsClient(settings.tavily_api_key)
+        return await asyncio.to_thread(
+            client.search_weather_news,
+            region_name=region_name,
+            start_date=start_date,
+            end_date=end_date,
+            max_results=max_results,
+        )
+    except Exception as e:
+        print(f"[News] _fetch_tavily_raw 失败: {e}")
+        return {"results": [], "count": 0}
 
 
 async def search_web(

@@ -45,7 +45,6 @@ export interface RAGSource {
   page: number           // 页码
   content_snippet: string // 摘要片段
   score: number          // 相关度分数 (0-1)
-  doc_id?: string        // 文档 ID，用于获取 PDF（可选）
 }
 
 export interface ReportItem {
@@ -285,7 +284,7 @@ export interface FullStreamEvent {
   step?: number
   step_name?: string
   content?: string
-  data_type?: 'time_series_original' | 'time_series_full' | 'news' | 'emotion' | 'influence' | 'anomaly_zones'
+  data_type?: 'time_series_original' | 'time_series_full' | 'news' | 'emotion' | 'influence' | 'anomaly_zones' | 'rag_sources'
   data?: unknown
   prediction_start_day?: string
   intent?: string

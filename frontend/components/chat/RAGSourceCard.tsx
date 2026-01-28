@@ -1,10 +1,8 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { FileText, ChevronDown, ChevronUp, ExternalLink, Sparkles, Loader2 } from 'lucide-react'
+import { useState } from 'react'
+import { FileText, ChevronDown, Sparkles } from 'lucide-react'
 import type { RAGSource } from '@/lib/api/analysis'
-
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
 interface RAGSourceCardProps {
   sources: RAGSource[]
@@ -58,28 +56,6 @@ export function RAGSourceCard({ sources }: RAGSourceCardProps) {
     }
   }
 
-  // 清理摘要文本
-  const cleanSnippet = (text: string) => {
-    return text
-      .replace(/^\d+\s*/gm, '')                         // 行首页码
-      .replace(/图表\s*\d+\s*[：:]\s*/g, '')              // "图表23："
-      .replace(/资料来源[：:]\s*/g, '来源：')               // 简化来源标记
-      .replace(/[≥≤≧≦➤►▶▷▸▹☞⊳⊲≻≫⋙⪢]/g, '')           // 特殊箭头
-      .replace(/[█▓▒░▊▋▌▍▎▏▐▀▄▆▇■□▪▫◆◇●○◎]/g, '')    // 方块圆形符号
-      .replace(/[☐☑☒✓✗✘✔✕✖✚✛✜]/g, '')                  // 勾叉符号
-      .replace(/\n{2,}/g, '\n')                          // 多余换行
-      .replace(/\s{2,}/g, ' ')                           // 多余空格
-      .trim()
-  }
-
-  // 根据分数获取相关度文字
-  const getScoreLabel = (score: number) => {
-    if (score >= 0.8) return '高度相关'
-    if (score >= 0.6) return '较为相关'
-    if (score >= 0.4) return '一般相关'
-    return '参考价值'
-  }
-
   return (
     <div className="space-y-3">
       {sources.map((source, index) => {
@@ -110,43 +86,23 @@ export function RAGSourceCard({ sources }: RAGSourceCardProps) {
               onClick={() => toggleExpand(index)}
               className="relative w-full flex items-center justify-between px-4 py-3 text-left hover:bg-dark-600/20 transition-all duration-200"
             >
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <div className={`p-1.5 rounded-lg bg-gradient-to-br ${
-                  source.score >= 0.8 ? 'from-green-500/20 to-emerald-500/20 border border-green-500/30' :
-                  source.score >= 0.6 ? 'from-blue-500/20 to-cyan-500/20 border border-blue-500/30' :
-                  source.score >= 0.4 ? 'from-yellow-500/20 to-amber-500/20 border border-yellow-500/30' :
-                  'from-gray-500/20 to-gray-500/20 border border-gray-500/30'
-                }`}>
-                  <FileText className={`w-4 h-4 ${scoreStyle.text}`} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm text-gray-200 truncate font-semibold group-hover:text-violet-300 transition-colors">
-                      {source.filename}
-                    </span>
-                    <span className="text-xs text-gray-500 px-2 py-0.5 bg-dark-700/50 rounded border border-white/5 flex-shrink-0">
-                      第 {source.page} 页
-                    </span>
-                  </div>
-                </div>
+              <div className="flex items-center gap-2 flex-1 min-w-0">
+                <FileText className={`w-4 h-4 flex-shrink-0 ${scoreStyle.text}`} />
+                <span className="text-sm text-gray-200 truncate font-semibold group-hover:text-violet-300 transition-colors">
+                  {source.filename}
+                </span>
               </div>
 
-              <div className="flex items-center gap-2 flex-shrink-0 ml-3">
-                {/* 相关度标签 */}
+              <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                <span className="text-[10px] text-gray-500 flex-shrink-0">p.{source.page}</span>
                 <span
-                  className={`text-[10px] px-2.5 py-1 rounded-lg border font-semibold shadow-sm ${scoreStyle.text} ${scoreStyle.bg} ${scoreStyle.border}`}
+                  className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${scoreStyle.text} ${scoreStyle.bg} ${scoreStyle.border}`}
                 >
-                  {getScoreLabel(source.score)} {(source.score * 100).toFixed(0)}%
+                  {(source.score * 100).toFixed(0)}%
                 </span>
-                <div className={`p-1 rounded transition-transform duration-200 ${
+                <ChevronDown className={`w-3.5 h-3.5 text-gray-400 transition-transform duration-200 ${
                   isExpanded ? 'rotate-180' : ''
-                }`}>
-                  {isExpanded ? (
-                    <ChevronUp className="w-4 h-4 text-gray-400" />
-                  ) : (
-                    <ChevronDown className="w-4 h-4 text-gray-400" />
-                  )}
-                </div>
+                }`} />
               </div>
             </button>
 
@@ -158,11 +114,7 @@ export function RAGSourceCard({ sources }: RAGSourceCardProps) {
                     <Sparkles className="w-3 h-3 text-violet-400" />
                     <span className="text-xs font-semibold text-violet-300 uppercase tracking-wide">内容摘要</span>
                   </div>
-                  <p className="line-clamp-4 text-gray-300">{cleanSnippet(source.content_snippet)}</p>
-                </div>
-                {/* 快捷操作 */}
-                <div className="mt-3 flex items-center gap-2">
-                  <ViewPdfButton source={source} />
+                  <p className="line-clamp-4 text-gray-300">{source.content_snippet}</p>
                 </div>
               </div>
             )}
@@ -170,63 +122,6 @@ export function RAGSourceCard({ sources }: RAGSourceCardProps) {
         )
       })}
     </div>
-  )
-}
-
-/**
- * 查看 PDF 按钮组件
- */
-function ViewPdfButton({ source }: { source: RAGSource }) {
-  const [loading, setLoading] = useState(false)
-
-  const handleViewPdf = useCallback(async (e: React.MouseEvent) => {
-    e.stopPropagation()
-
-    // 如果没有 doc_id，显示提示
-    if (!source.doc_id) {
-      alert(`研报来源: ${source.filename}\n页码: ${source.page}\n\n暂无法获取 PDF 文件`)
-      return
-    }
-
-    setLoading(true)
-    try {
-      // 获取文档详情
-      const response = await fetch(`${API_BASE_URL}/api/documents/${source.doc_id}`)
-      if (!response.ok) {
-        throw new Error('获取文档信息失败')
-      }
-      const docInfo = await response.json()
-
-      // 打开 PDF 预览
-      // 方式1: 如果有直接的 PDF URL，在新窗口打开
-      if (docInfo.file_path) {
-        // 尝试通过后端代理获取 PDF
-        const pdfUrl = `${API_BASE_URL}/api/documents/${source.doc_id}/pdf?page=${source.page}`
-        window.open(pdfUrl, '_blank')
-      } else {
-        alert(`研报: ${source.filename}\n页码: ${source.page}\n\nPDF 文件路径不可用`)
-      }
-    } catch (error) {
-      console.error('获取 PDF 失败:', error)
-      alert(`获取 PDF 失败: ${error instanceof Error ? error.message : '未知错误'}`)
-    } finally {
-      setLoading(false)
-    }
-  }, [source])
-
-  return (
-    <button
-      onClick={handleViewPdf}
-      disabled={loading}
-      className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-violet-400 hover:text-violet-300 bg-violet-500/10 hover:bg-violet-500/20 rounded-lg border border-violet-500/20 hover:border-violet-500/30 transition-all duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
-    >
-      {loading ? (
-        <Loader2 className="w-3 h-3 animate-spin" />
-      ) : (
-        <ExternalLink className="w-3 h-3" />
-      )}
-      {loading ? '加载中...' : '查看原文'}
-    </button>
   )
 }
 

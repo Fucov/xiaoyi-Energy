@@ -57,6 +57,11 @@ class WeatherClient:
             ValueError: 如果城市名称不支持
         """
         city_name = city_name.strip()
+        # 去掉常见行政后缀以匹配标准名称
+        for suffix in ("市", "省", "自治区", "特别行政区"):
+            if city_name.endswith(suffix) and city_name[:-len(suffix)] in CITY_COORDINATES:
+                city_name = city_name[:-len(suffix)]
+                break
         if city_name not in CITY_COORDINATES:
             raise ValueError(
                 f"不支持的城市: {city_name}。支持的城市: {', '.join(CITY_COORDINATES.keys())}"

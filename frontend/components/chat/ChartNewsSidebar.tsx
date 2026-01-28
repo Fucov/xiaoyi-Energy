@@ -127,7 +127,7 @@ export function ChartNewsSidebar({ isOpen, onClose, news, loading, selectedDate,
                     <div className="flex items-center gap-2">
                         <div className="p-1.5 rounded bg-violet-500/20"><TrendingUp className="w-4 h-4 text-violet-400" /></div>
                         <div>
-                            <h2 className="text-base font-semibold text-gray-200">{ticker || '区域'} 相关资讯</h2>
+                            <h2 className="text-base font-semibold text-gray-200">{ticker || '股票'} 相关资讯</h2>
                             <p className="text-gray-500 text-xs">{dateRangeText}</p>
                         </div>
                     </div>

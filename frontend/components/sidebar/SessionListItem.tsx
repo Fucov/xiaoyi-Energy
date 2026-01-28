@@ -76,7 +76,7 @@ export function SessionListItem({
 
     return (
         <div
-            className={`group relative mb-1 rounded-md transition-all ${isActive
+            className={`group relative mb-1 rounded-lg transition-all ${isActive
                 ? 'bg-violet-600/20 border border-violet-500/30'
                 : 'hover:bg-dark-600 border border-transparent'
                 }`}
@@ -85,9 +85,9 @@ export function SessionListItem({
         >
             {isEditing ? (
                 // 编辑模式：不使用button包裹，直接显示编辑表单
-                <div className="w-full px-2.5 py-2">
+                <div className="w-full px-3 py-2.5">
                     <div className="flex items-start gap-2">
-                        <MessageSquare className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-gray-400" />
+                        <MessageSquare className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
                         <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-1 pr-0">
                                 <input
@@ -98,7 +98,7 @@ export function SessionListItem({
                                         if (e.key === 'Enter') handleRenameSubmit()
                                         if (e.key === 'Escape') handleRenameCancel()
                                     }}
-                                    className="flex-1 min-w-0 px-2 py-1.5 bg-dark-700 border border-violet-500/50 rounded text-base text-gray-200 focus:outline-none focus:border-violet-500"
+                                    className="flex-1 min-w-0 px-2 py-1 bg-dark-700 border border-violet-500/50 rounded text-sm text-gray-200 focus:outline-none focus:border-violet-500"
                                     autoFocus
                                 />
                                 <button
@@ -133,10 +133,10 @@ export function SessionListItem({
                 // 正常模式：可点击的session按钮
                 <button
                     onClick={onSelect}
-                    className="w-full text-left px-2.5 py-2 relative"
+                    className="w-full text-left px-3 py-2.5 relative"
                 >
                     <div className="flex items-start gap-2">
-                        <MessageSquare className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-gray-400" />
+                        <MessageSquare className="w-4 h-4 mt-0.5 flex-shrink-0 text-gray-400" />
 
                         <div className="flex-1 min-w-0">
                             <div className="text-sm text-gray-200 truncate pr-12">

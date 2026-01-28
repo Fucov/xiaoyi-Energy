@@ -302,6 +302,15 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           }
           predictionStartDay = currentData.prediction_start_day || ''
 
+          // 恢复 RAG 来源
+          if (currentData.rag_sources && currentData.rag_sources.length > 0) {
+            setMessages((prev: Message[]) => prev.map((msg: Message) =>
+              msg.id === assistantMessageId
+                ? { ...msg, ragSources: currentData.rag_sources }
+                : msg
+            ))
+          }
+
           console.log('[ChatArea] Resume - Data Summary:')
           console.log('  - timeSeriesOriginal:', accumulatedTimeSeriesOriginal?.length || 0, 'points')
           console.log('  - timeSeriesFull:', accumulatedTimeSeriesFull?.length || 0, 'points')
@@ -328,52 +337,47 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         }
       },
 
-      // 步骤开始
+      // 步骤开始 - 只在 forecast 模式下更新步骤
       onStepStart: (step: number, stepName: string) => {
-        const steps = PREDICTION_STEPS.map((s, idx) => {
-          const stepNum = idx + 1
-          if (stepNum < step) {
-            return { ...s, status: 'completed' as StepStatus }
-          } else if (stepNum === step) {
-            return { ...s, status: 'running' as StepStatus, message: `${stepName}中...` }
-          }
-          return { ...s, status: 'pending' as StepStatus }
-        })
+        setMessages((prev: Message[]) => prev.map((msg: Message) => {
+          if (msg.id !== assistantMessageId) return msg
+          if (msg.renderMode !== 'forecast') return msg
 
-        setMessages((prev: Message[]) => prev.map((msg: Message) =>
-          msg.id === assistantMessageId
-            ? {
-                ...msg,
-                steps,
-                // 🔧 不在这里设置 renderMode，等 onIntent 确定是预测后再设置
-                // 这样普通对话就不会显示进度条
-              }
-            : msg
-        ))
+          const steps = PREDICTION_STEPS.map((s, idx) => {
+            const stepNum = idx + 1
+            if (stepNum < step) {
+              return { ...s, status: 'completed' as StepStatus }
+            } else if (stepNum === step) {
+              return { ...s, status: 'running' as StepStatus, message: `${stepName}中...` }
+            }
+            return { ...s, status: 'pending' as StepStatus }
+          })
+          return { ...msg, steps }
+        }))
       },
 
-      // 步骤完成
+      // 步骤完成 - 只在 forecast 模式下更新步骤
       onStepComplete: (step: number, data?: any) => {
-        // 捕获区域代码（步骤2完成时）
+        // 捕获区域代码（步骤2完成时，无论模式）
         if (step === 2 && data?.region_code) {
-          stockTicker = data.region_code  // 保留变量名以兼容
+          stockTicker = data.region_code
         } else if (step === 2 && data?.stock_code) {
-          stockTicker = data.stock_code  // 兼容旧数据
+          stockTicker = data.stock_code
         }
 
-        const steps = PREDICTION_STEPS.map((s, idx) => {
-          const stepNum = idx + 1
-          if (stepNum <= step) {
-            return { ...s, status: 'completed' as StepStatus, message: '已完成' }
-          }
-          return { ...s, status: 'pending' as StepStatus }
-        })
+        setMessages((prev: Message[]) => prev.map((msg: Message) => {
+          if (msg.id !== assistantMessageId) return msg
+          if (msg.renderMode !== 'forecast') return msg
 
-        setMessages((prev: Message[]) => prev.map((msg: Message) =>
-          msg.id === assistantMessageId
-            ? { ...msg, steps }
-            : msg
-        ))
+          const steps = PREDICTION_STEPS.map((s, idx) => {
+            const stepNum = idx + 1
+            if (stepNum <= step) {
+              return { ...s, status: 'completed' as StepStatus, message: '已完成' }
+            }
+            return { ...s, status: 'pending' as StepStatus }
+          })
+          return { ...msg, steps }
+        }))
       },
 
       // 思考内容（累积）
@@ -390,12 +394,22 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         ))
       },
 
-      // 意图识别结果
+      // 意图识别结果 - 确认是 forecast 后才初始化步骤
       onIntent: (_intent: string, isForecast: boolean) => {
         const renderMode: RenderMode = isForecast ? 'forecast' : 'chat'
         setMessages((prev: Message[]) => prev.map((msg: Message) =>
           msg.id === assistantMessageId
-            ? { ...msg, renderMode }
+            ? {
+              ...msg,
+              renderMode,
+              ...(isForecast ? {
+                steps: PREDICTION_STEPS.map((s, idx) => ({
+                  ...s,
+                  status: (idx === 0 ? 'completed' : 'pending') as StepStatus,
+                  message: idx === 0 ? '已完成' : undefined
+                }))
+              } : {})
+            }
             : msg
         ))
       },
@@ -418,19 +432,17 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           console.log('[ChatArea] ===== 收到影响因子数据 =====')
           console.log('[ChatArea] Raw data:', data)
 
-          // 类型断言为 Record 以便安全访问属性
-          const influenceRaw = data as Record<string, unknown>
-
+          const influenceRaw = data as any
           // 检查是否是新格式（包含factors字段）
           if (influenceRaw.factors && influenceRaw.correlation_matrix) {
             // 新格式：完整的InfluenceAnalysisResult
             accumulatedInfluence = influenceRaw
             console.log('[ChatArea] Parsed new format influence data')
 
-            const overallScore = (influenceRaw.overall_score as number) || 0
+            const overallScore = influenceRaw.overall_score || 0
             accumulatedEmotion = {
               score: overallScore,
-              description: (influenceRaw.summary as string) || '相关性分析'
+              description: influenceRaw.summary || '相关性分析'
             }
           } else {
             // 旧格式：兼容处理
@@ -473,6 +485,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           accumulatedChangePoints = data as any[]
           // 变点数据收到后即更新图表
           updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence, accumulatedChangePoints)
+        } else if (dataType === 'rag_sources') {
+          const ragSources = data as RAGSource[]
+          setMessages((prev: Message[]) => prev.map((msg: Message) =>
+            msg.id === assistantMessageId
+              ? { ...msg, ragSources }
+              : msg
+          ))
         }
       },
 
@@ -836,7 +855,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     }
 
     // 结构化回答：根据当前步骤生成内容（只显示已完成步骤的内容）
-    // 后端 6 步：1-意图识别, 2-区域验证, 3-数据获取, 4-分析处理, 5-模型预测, 6-报告生成
+    // 后端 6 步：1-意图识别, 2-股票验证, 3-数据获取, 4-分析处理, 5-模型预测, 6-报告生成
     const isCompleted = status === 'completed' || currentStep >= 6
 
     // 1. 多因素相关性分析（优先）或市场情绪（步骤4"分析处理"完成后显示）
@@ -881,7 +900,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           })
         }
       }
-      // 如果步骤 < 5，不添加内容（MessageBubble 会显示"影响因素分析中..."）
+      // 如果步骤 < 5，不添加情绪内容（MessageBubble 会显示"情绪分析中..."）
     }
 
     // 2. 新闻列表表格（步骤3"数据获取"完成后显示）
@@ -1248,7 +1267,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
   return (
     <main className="flex-1 flex flex-col min-w-0">
       {/* 顶部栏 */}
-      <header className="h-14 border-b border-white/5 flex items-center justify-between px-4 bg-dark-800/30">
+      <header className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-dark-800/30">
         <div className="flex items-center gap-4">
           <Image
             src="/logo.svg"
@@ -1257,7 +1276,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
             height={28}
             className="flex-shrink-0"
           />
-          <h2 className="text-xl font-semibold">
+          <h2 className="text-base font-semibold">
             小易猜猜
           </h2>
           {!isEmpty && isLoading && (
@@ -1270,13 +1289,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         </div>
         {!isEmpty && (
           <div className="flex items-center gap-2">
-            <button className="p-1.5 hover:bg-dark-600 rounded-lg transition-colors" title="导出报告">
+            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="导出报告">
               <Download className="w-4 h-4 text-gray-400" />
             </button>
-            <button className="p-1.5 hover:bg-dark-600 rounded-lg transition-colors" title="分享">
+            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="分享">
               <Share2 className="w-4 h-4 text-gray-400" />
             </button>
-            <button className="p-1.5 hover:bg-dark-600 rounded-lg transition-colors" title="更多">
+            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="更多">
               <MoreVertical className="w-4 h-4 text-gray-400" />
             </button>
           </div>
@@ -1284,7 +1303,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       </header>
 
       {/* 对话区域 */}
-      <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
+      <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-6">
         {isLoadingHistory ? (
           /* 加载历史记录中 */
           <div className="flex flex-col items-center justify-center h-full -mt-20">
@@ -1299,13 +1318,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           /* 空状态 - 欢迎界面 */
           <div className="flex flex-col items-center justify-center h-full -mt-20">
             <div className="text-center max-w-md">
-              <h3 className="text-lg font-semibold text-gray-200 mb-2">
+              <h3 className="text-2xl font-semibold text-gray-200 mb-3">
                 有什么可以帮忙的？
               </h3>
-              <p className="text-gray-400 text-sm mb-6">
-                我可以帮你分析供电趋势、预测用电需求、生成供电分析报告等
+              <p className="text-gray-400 text-sm mb-8">
+                我可以帮你分析股票走势、预测市场趋势、生成投资报告等
               </p>
-              <div className="flex flex-col gap-2">
+              <div className="flex flex-col gap-3">
                 {quickSuggestions.map((suggestion, index) => (
                   <button
                     key={index}
@@ -1313,7 +1332,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
                       // 直接发送快速追问
                       handleSend(suggestion)
                     }}
-                    className="px-3 py-2 bg-dark-600/50 hover:bg-dark-500/50 border border-white/5 hover:border-violet-500/30 rounded-lg text-left text-sm text-gray-300 hover:text-gray-100 transition-all"
+                    className="px-4 py-3 bg-dark-600/50 hover:bg-dark-500/50 border border-white/5 hover:border-violet-500/30 rounded-xl text-left text-sm text-gray-300 hover:text-gray-100 transition-all"
                   >
                     {suggestion}
                   </button>
@@ -1363,15 +1382,15 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       )}
 
       {/* 输入区域 */}
-      <div className="px-2 py-1.5 border-t border-white/5 bg-dark-800/50">
+      <div className="px-3 py-2 border-t border-white/5 bg-dark-800/50">
         <div className="max-w-4xl mx-auto">
           {/* 输入框行 */}
           <div className="flex items-center gap-2">
             {/* 输入框 */}
             <div className="flex-1 relative">
-              <div className="glass rounded-lg border border-white/10 focus-within:border-violet-500/50 transition-colors">
+              <div className="glass rounded-xl border border-white/10 focus-within:border-violet-500/50 transition-colors">
                 <textarea
-                  className="w-full bg-transparent px-3 py-2 text-sm text-gray-200 placeholder-gray-500 resize-none outline-none"
+                  className="w-full bg-transparent px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 resize-none outline-none"
                   rows={1}
                   placeholder="问我任何关于电力需求预测的问题..."
                   value={inputValue}
@@ -1383,7 +1402,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
 
             {/* 发送按钮 */}
             <button
-              className="p-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg transition-all flex-shrink-0 disabled:opacity-50"
+              className="p-2.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg transition-all flex-shrink-0 disabled:opacity-50"
               onClick={() => handleSend()}
               disabled={!inputValue.trim() || isLoading}
             >
@@ -1392,7 +1411,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           </div>
 
           {/* 底部提示 */}
-          <div className="flex items-center justify-between mt-1 px-1">
+          <div className="flex items-center justify-between mt-1.5 px-1">
             <div className="flex items-center gap-2 text-[10px] text-gray-600">
               <kbd className="px-1 py-0.5 bg-dark-600/50 rounded text-gray-500 text-[9px]">⌘↵</kbd>
               <span>发送</span>

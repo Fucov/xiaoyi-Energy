@@ -120,6 +120,11 @@ class ReportAgent(BaseAgent):
         f_mean = float(features.get("mean", 1))
         change_pct = (f_latest - f_mean) / f_mean * 100
 
+        model_name_raw = str(forecast_result.get("model", "unknown"))
+        model_display = {"historical_average": "电力预测模型"}.get(
+            model_name_raw, model_name_raw.upper() + "模型"
+        )
+
         prompt = f"""用户问题: {user_question}
 
 ## 数据特征分析
@@ -129,7 +134,7 @@ class ReportAgent(BaseAgent):
 
 {sentiment_section}
 ## 预测结果
-采用**{str(forecast_result.get("model", "unknown")).upper()}模型**进行预测，模型的历史回测精度为MAE={float(forecast_result.get("metrics", {}).get("mae", 0)):.4f}，预测期限为{len(forecast_summary)}天。
+采用**{model_display}**进行预测，预测期限为{len(forecast_summary)}天。
 
 根据预测结果，短期（7天）内预计变化为{short_term_change:+.2f}MW（{st_pct:+.2f}%），长期（{len(forecast_summary)}天）累计变化为{long_term_change:+.2f}MW（{lt_pct:+.2f}%）。
 
