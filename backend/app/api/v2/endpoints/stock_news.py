@@ -265,7 +265,7 @@ async def get_stock_events(
                 except (ValueError, TypeError):
                     pass
 
-        # 生成价格数据点
+        # 生成供电量数据点
         price_data = generate_price_points(close_prices, dates) if close_prices else []
 
         # 使用新的 SignificantPointService (now StockSignalService) 算法
@@ -307,7 +307,7 @@ async def get_stock_events(
             # The previous code used sig_service.calculate_points then generate_anomaly_zones.
             # DynamicClusteringService's generate_zones returns enriched zones.
 
-            # 标记事件触发的价格点
+            # 标记事件触发的供电量点
             # We need to identity which points are significant.
             # I will ensure StockSignalService puts date or similar info in zones or provides a method.
 
@@ -352,7 +352,7 @@ async def get_stock_events(
 
             # 如果没有新闻标题，使用算法生成的 summary
             if not zone_titles and "summary" not in zone:
-                zone["summary"] = f"价格波动区间"
+                zone["summary"] = f"供电量波动区间"
             elif not zone.get("summary"):
                 zone["summary"] = " | ".join(zone_titles[:5])
 

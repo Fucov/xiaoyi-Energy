@@ -16,9 +16,7 @@ from app.schemas.session_schema import NewsItem
 
 
 async def fetch_tavily_news(
-    region_name: str,
-    days: int = 30,
-    max_results: int = 5
+    region_name: str, days: int = 30, max_results: int = 5
 ) -> List[NewsItem]:
     """
     获取 Tavily 天气/电力相关新闻搜索结果
@@ -46,7 +44,7 @@ async def fetch_tavily_news(
             region_name=region_name,
             start_date=start_date,
             end_date=end_date,
-            max_results=max_results
+            max_results=max_results,
         )
 
         return [
@@ -56,7 +54,7 @@ async def fetch_tavily_news(
                 url=item.get("url", ""),
                 published_date=format_datetime(item.get("published_date", "")),
                 source_type="search",
-                source_name=extract_domain(item.get("url", ""))
+                source_name=extract_domain(item.get("url", "")),
             )
             for item in result.get("results", [])
         ]
@@ -66,9 +64,7 @@ async def fetch_tavily_news(
 
 
 async def fetch_news_all(
-    region_name: str,
-    days: int = 30,
-    tavily_limit: int = 10
+    region_name: str, days: int = 30, tavily_limit: int = 10
 ) -> Tuple[List[NewsItem], dict]:
     """
     获取全部新闻（仅使用 Tavily，搜索天气/电力相关）
@@ -96,31 +92,28 @@ async def fetch_news_all(
     for item in tavily_results.get("results", [])[:tavily_limit]:
         url = item.get("url", "")
         pub_date = item.get("published_date") or ""
-        news_items.append(NewsItem(
-            title=item.get("title", ""),
-            content=item.get("content", "")[:300],
-            url=url,
-            published_date=format_datetime(pub_date) if pub_date else "-",
-            source_type="search",
-            source_name=extract_domain(url)
-        ))
+        news_items.append(
+            NewsItem(
+                title=item.get("title", ""),
+                content=item.get("content", "")[:300],
+                url=url,
+                published_date=format_datetime(pub_date) if pub_date else "-",
+                source_type="search",
+                source_name=extract_domain(url),
+            )
+        )
 
     tavily_count = len(tavily_results.get("results", [])[:tavily_limit])
     print(f"[News] 获取新闻: Tavily {tavily_count} 条")
 
     # 构建情感分析数据
-    sentiment_data = {
-        "tavily_results": tavily_results,
-        "news_count": len(news_items)
-    }
+    sentiment_data = {"tavily_results": tavily_results, "news_count": len(news_items)}
 
     return news_items, sentiment_data
 
 
 async def _fetch_tavily_raw(
-    region_name: str,
-    days: int = 30,
-    max_results: int = 10
+    region_name: str, days: int = 30, max_results: int = 10
 ) -> dict:
     """
     获取 Tavily 原始数据（内部使用）
@@ -139,11 +132,13 @@ async def _fetch_tavily_raw(
         region_name=region_name,
         start_date=start_date,
         end_date=end_date,
-        max_results=max_results
+        max_results=max_results,
     )
 
 
-async def search_web(keywords: List[str], days: int = 30, max_results: int = 10) -> List[dict]:
+async def search_web(
+    keywords: List[str], days: int = 30, max_results: int = 10
+) -> List[dict]:
     """
     通用网络搜索（非股票专用）
 
@@ -172,7 +167,7 @@ async def search_web(keywords: List[str], days: int = 30, max_results: int = 10)
             query=query,
             start_date=start_date,
             end_date=end_date,
-            max_results=max_results
+            max_results=max_results,
         )
         print(f"[Search] 网络搜索时间范围: {start_date} ~ {end_date}")
         return result.get("results", [])
@@ -212,18 +207,61 @@ async def fetch_domain_news(region_name: str, keywords: List[str]) -> List[dict]
             region_name=region_name or "",
             start_date=start_date,
             end_date=end_date,
-            max_results=10
+            max_results=10,
         )
 
         items = []
         for item in result.get("results", [])[:10]:
-            items.append({
-                "title": item.get("title", ""),
-                "content": item.get("content", "")[:200],
-                "url": item.get("url", ""),
-                "date": item.get("published_date", "")
-            })
+            items.append(
+                {
+                    "title": item.get("title", ""),
+                    "content": item.get("content", "")[:200],
+                    "url": item.get("url", ""),
+                    "date": item.get("published_date", ""),
+                }
+            )
         return items
     except Exception as e:
         print(f"[Domain] 获取新闻失败: {e}")
+        return []
+
+
+async def search_news_around_date(
+    keywords: List[str], target_date: str, days: int = 3, max_results: int = 3
+) -> List[dict]:
+    """
+    Search for news around a specific historical date.
+
+    Args:
+        keywords: Search keywords
+        target_date: Target date string (YYYY-MM-DD)
+        days: Window size in days (target_date +/- days)
+        max_results: Max results
+
+    Returns:
+        List of result dicts
+    """
+    if not keywords or not target_date:
+        return []
+
+    try:
+        dt = datetime.strptime(target_date, "%Y-%m-%d")
+        start_date = (dt - timedelta(days=days)).strftime("%Y-%m-%d")
+        end_date = (dt + timedelta(days=days)).strftime("%Y-%m-%d")
+
+        client = TavilyNewsClient(settings.tavily_api_key)
+        query = " ".join(keywords[:3])
+
+        # Use simple search, not search_weather_news
+        result = await asyncio.to_thread(
+            client.search,
+            query=query,
+            start_date=start_date,
+            end_date=end_date,
+            max_results=max_results,
+        )
+        print(f"[Search] Historical search for {target_date} ({start_date}~{end_date})")
+        return result.get("results", [])
+    except Exception as e:
+        print(f"[Search] Historical search failed: {e}")
         return []

@@ -48,9 +48,7 @@ class SentimentAgent(BaseAgent):
 只返回 JSON"""
 
     def analyze_streaming(
-        self,
-        news_items: list,
-        on_chunk: Callable[[str], None]
+        self, news_items: list, on_chunk: Callable[[str], None]
     ) -> Dict[str, Any]:
         """
         流式分析新闻情绪
@@ -71,8 +69,7 @@ class SentimentAgent(BaseAgent):
         news_text = self._format_news_items(news_items)
 
         messages = self.build_messages(
-            user_content=f"新闻列表:\n{news_text}",
-            system_prompt=self.SYSTEM_PROMPT
+            user_content=f"新闻列表:\n{news_text}", system_prompt=self.SYSTEM_PROMPT
         )
 
         # 流式调用
@@ -108,22 +105,12 @@ class SentimentAgent(BaseAgent):
                 on_chunk(chunk)
                 description_buffer += chunk
 
-        self.call_llm(
-            messages,
-            stream=True,
-            on_chunk=stream_handler,
-            fallback=""
-        )
+        self.call_llm(messages, stream=True, on_chunk=stream_handler, fallback="")
 
-        return {
-            "score": score,
-            "description": description_buffer.strip() or "中性情绪"
-        }
+        return {"score": score, "description": description_buffer.strip() or "中性情绪"}
 
     def recommend_params(
-        self,
-        sentiment_result: Dict[str, Any],
-        features: Dict[str, Any]
+        self, sentiment_result: Dict[str, Any], features: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         基于情绪分析和时序特征推荐 Prophet 参数
@@ -135,25 +122,24 @@ class SentimentAgent(BaseAgent):
         Returns:
             Prophet 参数
         """
-        user_prompt = f"""股票特征:
-- 趋势: {features.get('trend', '未知')}
-- 波动性: {features.get('volatility', '未知')}
-- 数据点数: {features.get('data_points', 0)}
+        user_prompt = f"""电力需求特征:
+- 趋势: {features.get("trend", "未知")}
+- 波动性: {features.get("volatility", "未知")}
+- 数据点数: {features.get("data_points", 0)}
 
 情绪分析:
-- 情绪得分: {sentiment_result.get('score', 0)}
-- 描述: {sentiment_result.get('description', '中性')}"""
+- 情绪得分: {sentiment_result.get("score", 0)}
+- 描述: {sentiment_result.get("description", "中性")}"""
 
         messages = self.build_messages(
-            user_content=user_prompt,
-            system_prompt=self.PARAMS_SYSTEM_PROMPT
+            user_content=user_prompt, system_prompt=self.PARAMS_SYSTEM_PROMPT
         )
 
         content = self.call_llm(
             messages,
             fallback=None,
             temperature=0.1,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
         )
 
         if content is None:
@@ -177,5 +163,5 @@ class SentimentAgent(BaseAgent):
             "changepoint_prior_scale": 0.05,
             "seasonality_prior_scale": 10,
             "changepoint_range": 0.8,
-            "reasoning": "使用默认参数"
+            "reasoning": "使用默认参数",
         }

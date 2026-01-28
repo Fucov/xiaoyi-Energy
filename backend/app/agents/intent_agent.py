@@ -193,7 +193,7 @@ class IntentAgent(BaseAgent):
 }
 ```"""
 
-    CHAT_SYSTEM_PROMPT = """你是专业的金融分析助手。根据上下文和对话历史回答用户问题。
+    CHAT_SYSTEM_PROMPT = """你是专业的电力能源分析助手。根据上下文和对话历史回答用户问题。
 
 要求：
 1. 回答简洁专业
@@ -210,8 +210,12 @@ class IntentAgent(BaseAgent):
             enable_search=result.get("enable_search", False),
             enable_domain_info=result.get("enable_domain_info", False),
             # 优先使用region字段，如果没有则使用stock字段（兼容）
-            region_mention=result.get("region_mention") or result.get("stock_mention") or None,
-            region_name=result.get("region_name") or result.get("stock_full_name") or None,
+            region_mention=result.get("region_mention")
+            or result.get("stock_mention")
+            or None,
+            region_name=result.get("region_name")
+            or result.get("stock_full_name")
+            or None,
             # 保留stock字段以兼容旧数据
             stock_mention=result.get("stock_mention") or None,
             stock_full_name=result.get("stock_full_name") or None,
@@ -222,14 +226,14 @@ class IntentAgent(BaseAgent):
             history_days=result.get("history_days", 365),
             forecast_horizon=result.get("forecast_horizon", 30),
             reason=result.get("reason", ""),
-            out_of_scope_reply=result.get("out_of_scope_reply")
+            out_of_scope_reply=result.get("out_of_scope_reply"),
         )
 
     def recognize_intent_streaming(
         self,
         user_query: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
-        on_thinking_chunk: Optional[Callable[[str], None]] = None
+        on_thinking_chunk: Optional[Callable[[str], None]] = None,
     ) -> Tuple[UnifiedIntent, str]:
         """
         流式意图识别 - 实时返回思考过程
@@ -245,7 +249,7 @@ class IntentAgent(BaseAgent):
         messages = self.build_messages(
             user_content=f"用户问题: {user_query}\n\n请分析意图。",
             system_prompt=self.STREAMING_SYSTEM_PROMPT,
-            conversation_history=conversation_history
+            conversation_history=conversation_history,
         )
 
         # 使用状态变量跟踪是否进入 JSON 块
@@ -256,7 +260,9 @@ class IntentAgent(BaseAgent):
 
             if "```json" in state["full_content"] and not state["in_json_block"]:
                 state["in_json_block"] = True
-                state["thinking_content"] = state["full_content"].split("```json")[0].strip()
+                state["thinking_content"] = (
+                    state["full_content"].split("```json")[0].strip()
+                )
 
             if not state["in_json_block"] and on_thinking_chunk:
                 on_thinking_chunk(delta)
@@ -277,7 +283,7 @@ class IntentAgent(BaseAgent):
             result = {
                 "is_in_scope": True,
                 "is_forecast": False,
-                "reason": "解析失败，使用默认值"
+                "reason": "解析失败，使用默认值",
             }
 
         thinking_content = state["thinking_content"]
@@ -312,12 +318,12 @@ class IntentAgent(BaseAgent):
         # 优先使用region，如果没有则使用stock（兼容）
         matched_name = region_name or stock_name
         matched_code = region_code or stock_code
-        
+
         if not matched_name and not matched_code:
             return ResolvedKeywords(
                 search_keywords=intent.raw_search_keywords,
                 rag_keywords=intent.raw_rag_keywords,
-                domain_keywords=intent.raw_domain_keywords
+                domain_keywords=intent.raw_domain_keywords,
             )
 
         search_keywords = list(intent.raw_search_keywords)
@@ -340,7 +346,7 @@ class IntentAgent(BaseAgent):
 
         # 优先使用region_mention，如果没有则使用stock_mention（兼容）
         region_mention = intent.region_mention or intent.stock_mention
-        
+
         if region_mention and matched_name and region_mention != matched_name:
             for i, kw in enumerate(search_keywords):
                 if region_mention in kw:
@@ -355,7 +361,7 @@ class IntentAgent(BaseAgent):
         return ResolvedKeywords(
             search_keywords=search_keywords,
             rag_keywords=rag_keywords,
-            domain_keywords=domain_keywords
+            domain_keywords=domain_keywords,
         )
 
     def generate_chat_response(
@@ -363,7 +369,7 @@ class IntentAgent(BaseAgent):
         user_query: str,
         conversation_history: Optional[List[Dict[str, str]]] = None,
         context: Optional[str] = None,
-        stream: bool = False
+        stream: bool = False,
     ):
         """
         生成聊天回复 (非预测流程)
@@ -385,7 +391,7 @@ class IntentAgent(BaseAgent):
             user_content=user_content,
             system_prompt=self.CHAT_SYSTEM_PROMPT,
             conversation_history=conversation_history,
-            history_window=10
+            history_window=10,
         )
 
         if stream:
@@ -397,10 +403,7 @@ class IntentAgent(BaseAgent):
         """流式响应 - 生成器模式"""
         # 使用底层 client 直接调用以支持生成器模式
         response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            temperature=0.3,
-            stream=True
+            model=self.model, messages=messages, temperature=0.3, stream=True
         )
 
         for chunk in response:

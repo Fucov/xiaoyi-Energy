@@ -54,6 +54,15 @@ export interface ChartContent {
     sentiment: 'positive' | 'negative' | 'neutral'
   }>
   ticker?: string  // 区域代码，用于获取新闻
+
+  // 变点检测（新增）
+  changePoints?: Array<{
+    date: string
+    index: number
+    type: string
+    magnitude: number
+    reason: string
+  }>
 }
 
 // 表格内容
@@ -256,15 +265,9 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     let accumulatedTimeSeriesFull: TimeSeriesPoint[] = []
     let accumulatedNews: NewsItem[] = []
     let accumulatedEmotion: { score: number; description: string } | null = null
-    let accumulatedInfluence: {
-      temperature_influence?: number
-      humidity_influence?: number
-      seasonality_influence?: number
-      trend_influence?: number
-      volatility_influence?: number
-      description?: string
-    } | null = null
+    let accumulatedInfluence: any = null  // 支持新旧两种格式
     let accumulatedAnomalyZones: any[] = []  // 异常区域
+    let accumulatedChangePoints: any[] = []  // 变点检测
     let stockTicker = ''  // 区域代码（保留变量名以兼容）
     let predictionStartDay = ''
 
@@ -319,7 +322,8 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
             backendMessageId,
             accumulatedAnomalyZones,
             stockTicker,
-            accumulatedInfluence
+            accumulatedInfluence,
+            currentData.change_points || []
           )
         }
       },
@@ -401,33 +405,50 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         console.log('[ChatArea] onData received:', dataType, data)
         if (dataType === 'time_series_original') {
           accumulatedTimeSeriesOriginal = data as TimeSeriesPoint[]
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, null, accumulatedNews, accumulatedEmotion, null, '', backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, null, accumulatedNews, accumulatedEmotion, null, '', backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence, accumulatedChangePoints)
         } else if (dataType === 'time_series_full') {
           accumulatedTimeSeriesFull = data as TimeSeriesPoint[]
           predictionStartDay = predStart || ''
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence, accumulatedChangePoints)
         } else if (dataType === 'news') {
           accumulatedNews = data as NewsItem[]
           updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
         } else if (dataType === 'influence') {
-          // 多因素影响力数据
+          // 多因素相关性数据
           console.log('[ChatArea] ===== 收到影响因子数据 =====')
           console.log('[ChatArea] Raw data:', data)
-          const influenceData = data as {
-            temperature_influence?: number
-            humidity_influence?: number
-            seasonality_influence?: number
-            trend_influence?: number
-            volatility_influence?: number
-            description?: string
+          
+          // 检查是否是新格式（包含factors字段）
+          if (data.factors && data.correlation_matrix) {
+            // 新格式：完整的InfluenceAnalysisResult
+            accumulatedInfluence = data
+            console.log('[ChatArea] Parsed new format influence data')
+            
+            const overallScore = data.overall_score || 0
+            accumulatedEmotion = { 
+              score: overallScore, 
+              description: data.summary || '相关性分析' 
+            }
+          } else {
+            // 旧格式：兼容处理
+            const influenceData = data as {
+              temperature_influence?: number
+              humidity_influence?: number
+              seasonality_influence?: number
+              trend_influence?: number
+              volatility_influence?: number
+              description?: string
+            }
+            accumulatedInfluence = influenceData
+            console.log('[ChatArea] Parsed legacy format influence data:', accumulatedInfluence)
+            
+            // 兼容：同时设置emotion（使用overall_score或平均值）
+            const overallScore = influenceData.temperature_influence && influenceData.humidity_influence && influenceData.seasonality_influence && influenceData.trend_influence && influenceData.volatility_influence
+              ? (influenceData.temperature_influence + influenceData.humidity_influence + influenceData.seasonality_influence + influenceData.trend_influence + influenceData.volatility_influence) / 5
+              : 0
+            accumulatedEmotion = { score: overallScore, description: influenceData.description || '相关性分析' }
           }
-          accumulatedInfluence = influenceData
-          console.log('[ChatArea] Parsed influence data:', accumulatedInfluence)
-          // 兼容：同时设置emotion（使用overall_score或平均值）
-          const overallScore = influenceData.temperature_influence && influenceData.humidity_influence && influenceData.seasonality_influence && influenceData.trend_influence && influenceData.volatility_influence
-            ? (influenceData.temperature_influence + influenceData.humidity_influence + influenceData.seasonality_influence + influenceData.trend_influence + influenceData.volatility_influence) / 5
-            : 0
-          accumulatedEmotion = { score: overallScore, description: influenceData.description || '影响因素分析' }
+          
           console.log('[ChatArea] Calling updateContentsFromStreamData with influence:', accumulatedInfluence)
           updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
           console.log('[ChatArea] ===== 影响因子数据已处理 =====')
@@ -443,13 +464,18 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           stockTicker = zonesData.ticker || ''
           console.log('[ChatArea] Extracted - zones:', accumulatedAnomalyZones.length, 'ticker:', stockTicker)
           // 异常区数据收到后立即更新图表
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence, accumulatedChangePoints)
+        } else if (dataType === 'change_points') {
+          console.log('[ChatArea] Received change_points:', data)
+          accumulatedChangePoints = data as any[]
+          // 变点数据收到后即更新图表
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence, accumulatedChangePoints)
         }
       },
 
       // 报告流式（累积）
       onReportChunk: (content: string) => {
-        updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, content, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
+        updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, content, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence, accumulatedChangePoints)
       },
 
       // 聊天流式（累积）
@@ -484,7 +510,8 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           backendMessageId,
           accumulatedAnomalyZones,
           stockTicker,
-          accumulatedInfluence
+          accumulatedInfluence,
+          accumulatedChangePoints
         )
       },
 
@@ -763,6 +790,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         sentiment: 'positive' | 'negative' | 'neutral'
       }>
       anomaly_zones_ticker?: string | null
+      change_points?: Array<{
+        date: string
+        index: number
+        type: string
+        magnitude: number
+        reason: string
+      }>
     },
     currentStep: number = 0,
     status: string = 'pending'
@@ -841,27 +875,27 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       })
     }
 
-    // 3. 价格走势图表（分步渲染）
-    // 步骤3"数据获取"后：如果有原始数据，先渲染历史价格
+    // 3. 供电量走势图表（分步渲染）
+    // 步骤3"数据获取"后：如果有原始数据，先渲染历史供电量
     if ((currentStep >= 3 || isCompleted) && data.time_series_original && data.time_series_original.length > 0) {
       const hasForecast = data.prediction_done && data.time_series_full && data.time_series_full.length > 0
 
-      // 步骤5"模型预测"后：同时显示历史和预测价格
+      // 步骤5"模型预测"后：同时显示历史和预测供电量
       if (hasForecast && (currentStep >= 5 || isCompleted) && data.time_series_full) {
-        // 步骤6+：同时显示历史和预测价格
+        // 步骤6+：同时显示历史和预测供电量
         const originalLength = data.time_series_original.length
         const allLabels = data.time_series_full.map((p) => p.date)
-        // 历史价格：包含到最后一个历史数据点，之后为null
+        // 历史供电量：包含到最后一个历史数据点，之后为null
         const historicalData = data.time_series_full.map((p, idx) =>
           idx < originalLength ? p.value : null
         )
-        // 预测价格：从最后一个历史数据点开始（使用历史价格的最后一个值），之后为预测值
+        // 预测供电量：从最后一个历史数据点开始（使用历史供电量的最后一个值），之后为预测值
         const lastHistoricalValue = data.time_series_full[originalLength - 1]?.value
         const forecastData = data.time_series_full.map((p, idx) => {
           if (idx < originalLength - 1) {
             return null
           } else if (idx === originalLength - 1) {
-            // 交接点：使用历史价格的最后一个值，使两条曲线连接
+            // 交接点：使用历史供电量的最后一个值，使两条曲线连接
             return lastHistoricalValue
           } else {
             // 预测值
@@ -871,17 +905,17 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
 
         contents.push({
           type: 'chart',
-          title: '', // 标题由外层MessageBubble显示"价格走势分析"，这里不重复显示
+          title: '', // 标题由外层MessageBubble显示"供电量走势分析"，这里不重复显示
           data: {
             labels: allLabels,
             datasets: [
               {
-                label: '历史价格',
+                label: '历史供电量',
                 data: historicalData,
                 color: '#8b5cf6'
               },
               {
-                label: '预测价格',
+                label: '预测供电量',
                 data: forecastData,
                 color: '#06b6d4'
               }
@@ -893,21 +927,22 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           originalData: data.time_series_original,
           // 异常区域和股票代码（用于刷新后恢复）
           anomalyZones: data.anomaly_zones || [],
-          ticker: data.anomaly_zones_ticker ?? undefined
+          ticker: data.anomaly_zones_ticker ?? undefined,
+          changePoints: data.change_points || []
         })
       } else {
-        // 步骤2-5：只显示历史价格
+        // 步骤2-5：只显示历史供电量
         const historicalLabels = data.time_series_original.map((p) => p.date)
         const historicalData = data.time_series_original.map((p) => p.value)
 
         contents.push({
           type: 'chart',
-          title: '', // 标题由外层MessageBubble显示"价格走势分析"，这里不重复显示
+          title: '', // 标题由外层MessageBubble显示"供电量走势分析"，这里不重复显示
           data: {
             labels: historicalLabels,
             datasets: [
               {
-                label: '历史价格',
+                label: '历史供电量',
                 data: historicalData,
                 color: '#8b5cf6'
               }
@@ -919,7 +954,8 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           originalData: data.time_series_original,
           // 异常区域和股票代码（用于刷新后恢复）
           anomalyZones: data.anomaly_zones || [],
-          ticker: data.anomaly_zones_ticker ?? undefined
+          ticker: data.anomaly_zones_ticker ?? undefined,
+          changePoints: data.change_points || []
         })
       }
     }
@@ -1061,21 +1097,33 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       trend_influence?: number
       volatility_influence?: number
       description?: string
-    } | null
+    } | null,
+    changePoints?: any[]
   ) => {
     setMessages((prev: Message[]) => prev.map((msg: Message) => {
       if (msg.id !== messageId) return msg
 
       const newContents: (TextContent | ChartContent | TableContent)[] = []
 
-      // 1. 多因素影响力（优先）或情绪（兼容）
+      // 1. 多因素相关性（优先）或情绪（兼容）
       if (influence) {
         // 使用影响因子数据
         console.log('[ChatArea] updateContentsFromStreamData: Adding influence marker with data:', influence)
-        newContents.push({
-          type: 'text',
-          text: `__INFLUENCE_MARKER__${JSON.stringify(influence)}__`
-        })
+        try {
+          // 清理NaN值以便JSON序列化
+          const cleanedInfluence = JSON.parse(JSON.stringify(influence, (key, value) => {
+            if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) {
+              return null
+            }
+            return value
+          }))
+          newContents.push({
+            type: 'text',
+            text: `__INFLUENCE_MARKER__${JSON.stringify(cleanedInfluence)}__`
+          })
+        } catch (e) {
+          console.error('[ChatArea] Failed to stringify influence data:', e, influence)
+        }
       } else if (emotion) {
         // 兼容旧的情绪数据格式
         newContents.push({
@@ -1119,15 +1167,16 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           data: {
             labels: allLabels,
             datasets: [
-              { label: '历史价格', data: historicalData, color: '#8b5cf6' },
-              { label: '预测价格', data: forecastData, color: '#06b6d4' }
+              { label: '历史供电量', data: historicalData, color: '#8b5cf6' },
+              { label: '预测供电量', data: forecastData, color: '#06b6d4' }
             ]
           },
           sessionId: backendSessionId,
           messageId: backendMessageId,
           originalData: timeSeriesOriginal,
           anomalyZones: anomalyZones || [],
-          ticker: ticker
+          ticker: ticker,
+          changePoints: changePoints || []
         })
         console.log('[ChatArea] Created chart with anomalyZones:', anomalyZones?.length || 0, 'zones, ticker:', ticker)
       } else if (timeSeriesOriginal.length > 0) {
@@ -1138,14 +1187,15 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           data: {
             labels: timeSeriesOriginal.map((p) => p.date),
             datasets: [
-              { label: '历史价格', data: timeSeriesOriginal.map((p) => p.value), color: '#8b5cf6' }
+              { label: '历史供电量', data: timeSeriesOriginal.map((p) => p.value), color: '#8b5cf6' }
             ]
           },
           sessionId: backendSessionId,
           messageId: backendMessageId,
           originalData: timeSeriesOriginal,
           anomalyZones: anomalyZones || [],
-          ticker: ticker
+          ticker: ticker,
+          changePoints: changePoints || []
         })
       }
 
