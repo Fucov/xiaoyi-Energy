@@ -7,7 +7,7 @@ import { Download, Share2, MoreVertical, Send } from 'lucide-react'
 import { MessageBubble } from './MessageBubble'
 import { QuickSuggestions } from './QuickSuggestions'
 import { AnalysisCards } from './AnalysisCards'
-import type { RAGSource, ThinkingLogEntry, TimeSeriesPoint, NewsItem, MessageData } from '@/lib/api/analysis'
+import type { RAGSource, ThinkingLogEntry, TimeSeriesPoint, NewsItem, MessageData, InfluenceAnalysisResult } from '@/lib/api/analysis'
 
 // 步骤状态
 export type StepStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -149,8 +149,8 @@ export const PREDICTION_STEPS: Omit<Step, 'status' | 'message'>[] = [
 const defaultQuickSuggestions = [
   '预测北京未来30天的供电需求',
   '分析上海最近用电量趋势',
-  '查看广州的天气对供电的影响',
-  '生成一份供电需求分析报告',
+  '查看南京的天气对供电的影响',
+  '生成一份北京过去30天供电需求分析报告',
 ]
 
 interface ChatAreaProps {
@@ -771,6 +771,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       prediction_done?: boolean
       emotion?: number | null
       emotion_des?: string | null
+      influence_analysis?: InfluenceAnalysisResult | null
       news_list?: Array<{
         summarized_title: string
         summarized_content: string
@@ -820,6 +821,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     const isSimpleAnswer = data.conclusion &&
       (!data.time_series_full || data.time_series_full.length === 0) &&
       (data.emotion === null || data.emotion === undefined) &&
+      !data.influence_analysis &&
       (!data.news_list || data.news_list.length === 0)
 
     // 如果是简单问答，只返回文本内容，不生成结构化数据
@@ -837,27 +839,47 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     // 后端 6 步：1-意图识别, 2-区域验证, 3-数据获取, 4-分析处理, 5-模型预测, 6-报告生成
     const isCompleted = status === 'completed' || currentStep >= 6
 
-    // 1. 影响因子分析（步骤4"分析处理"完成后显示）
+    // 1. 多因素相关性分析（优先）或市场情绪（步骤4"分析处理"完成后显示）
     if (currentStep >= 4 || isCompleted) {
-      // emotion_des 可能是空字符串，需要使用严格的 null/undefined 检查
-      const hasValidEmotion = typeof data.emotion === 'number'
-      const hasEmotionDes = data.emotion_des !== null && data.emotion_des !== undefined
+      // 优先使用多因素相关性分析数据
+      if (data.influence_analysis) {
+        try {
+          // 清理NaN值以便JSON序列化
+          const cleanedInfluence = JSON.parse(JSON.stringify(data.influence_analysis, (key, value) => {
+            if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) {
+              return null
+            }
+            return value
+          }))
+          contents.push({
+            type: 'text',
+            text: `__INFLUENCE_MARKER__${JSON.stringify(cleanedInfluence)}__`
+          })
+        } catch (e) {
+          console.error('[ChatArea] Failed to stringify influence_analysis:', e, data.influence_analysis)
+        }
+      } else {
+        // 兼容旧的情绪数据格式
+        // emotion_des 可能是空字符串，需要使用严格的 null/undefined 检查
+        const hasValidEmotion = typeof data.emotion === 'number'
+        const hasEmotionDes = data.emotion_des !== null && data.emotion_des !== undefined
 
-      if (hasValidEmotion && hasEmotionDes) {
-        // 使用后端返回的真实数据（emotion_des 为空字符串时使用默认值）
-        const emotionDescription = data.emotion_des || '中性'
-        contents.push({
-          type: 'text',
-          text: `__EMOTION_MARKER__${data.emotion}__${emotionDescription}__`
-        })
-      } else if (isCompleted) {
-        // 已完成但无数据，使用模拟数据
-        const mockEmotion = Math.random() * 0.6 + 0.2 // 0.2 到 0.8 之间
-        const mockDescription = '影响因子分析中，基于天气和历史数据综合评估'
-        contents.push({
-          type: 'text',
-          text: `__EMOTION_MARKER__${mockEmotion}__${mockDescription}__`
-        })
+        if (hasValidEmotion && hasEmotionDes) {
+          // 使用后端返回的真实数据（emotion_des 为空字符串时使用默认值）
+          const emotionDescription = data.emotion_des || '中性'
+          contents.push({
+            type: 'text',
+            text: `__EMOTION_MARKER__${data.emotion}__${emotionDescription}__`
+          })
+        } else if (isCompleted) {
+          // 已完成但无数据，使用模拟数据
+          const mockEmotion = Math.random() * 0.6 + 0.2 // 0.2 到 0.8 之间
+          const mockDescription = '市场情绪分析中，基于新闻和技术指标综合评估'
+          contents.push({
+            type: 'text',
+            text: `__EMOTION_MARKER__${mockEmotion}__${mockDescription}__`
+          })
+        }
       }
       // 如果步骤 < 5，不添加内容（MessageBubble 会显示"影响因素分析中..."）
     }
@@ -868,12 +890,11 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       contents.push({
         type: 'table',
         title: '', // 标题由外层MessageBubble显示"相关新闻"，这里不重复显示
-        headers: ['标题', '来源', '时间'],
+        headers: ['标题', '来源'],
         rows: data.news_list.slice(0, 10).map((news) => [
           // 如果有 URL，使用 markdown 链接格式 [标题](url)；否则只显示标题
           news.url ? `[${news.summarized_title}](${news.url})` : news.summarized_title,
           news.source_name || (news.source_type === 'search' ? '网络' : '资讯'),
-          news.published_date
         ])
       })
     }
@@ -1140,11 +1161,10 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         newContents.push({
           type: 'table',
           title: '',
-          headers: ['标题', '来源', '时间'],
+          headers: ['标题', '来源'],
           rows: news.slice(0, 10).map((n) => [
             n.url ? `[${n.summarized_title}](${n.url})` : n.summarized_title,
             n.source_name || (n.source_type === 'search' ? '网络' : '资讯'),
-            n.published_date
           ])
         })
       }

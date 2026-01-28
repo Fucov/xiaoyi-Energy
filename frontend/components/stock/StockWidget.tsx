@@ -99,6 +99,25 @@ const CustomTooltip = ({ active, payload }: TooltipProps<number, string>) => {
     return null;
 };
 
+
+
+const ToggleGroup: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => (
+    <div className="flex items-center bg-gray-800/80 rounded-lg p-1 border border-gray-700 shadow-sm">
+        <button
+            onClick={() => onChange('plr')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${value === 'plr' ? 'bg-violet-500 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
+        >
+            Raw
+        </button>
+        <button
+            onClick={() => onChange('semantic')}
+            className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${value === 'semantic' ? 'bg-violet-500 text-white shadow-md' : 'text-gray-400 hover:text-gray-200'}`}
+        >
+            Semantic
+        </button>
+    </div>
+);
+
 // 新闻卡片组件
 const NewsCard: React.FC<{ news: NewsItem; index: number }> = ({ news, index }) => {
     const style = getContentTypeStyle(news.content_type);
@@ -215,6 +234,14 @@ export function StockWidget({ ticker, title }: StockWidgetProps) {
     const [loading, setLoading] = useState(true);
     const [newsLoading, setNewsLoading] = useState(false);
     const [activeZone, setActiveZone] = useState<AnomalyZone | null>(null);
+    const [trendAlgo, setTrendAlgo] = useState('semantic');
+
+    // Filter Logic
+    const visibleZones = anomalyZones.filter(z => {
+        if (trendAlgo === 'all') return true;
+        // @ts-ignore
+        return (z.method || 'plr') === trendAlgo || (trendAlgo === 'semantic' && z.zone_type === 'semantic_regime');
+    });
 
     // 加载股票数据
     useEffect(() => {
@@ -316,9 +343,16 @@ export function StockWidget({ ticker, title }: StockWidgetProps) {
                             <XAxis dataKey="date" stroke="#6b7280" tick={{ fill: '#6b7280', fontSize: 11 }} tickFormatter={formatDate} tickLine={false} axisLine={false} />
                             <YAxis stroke="#6b7280" tick={{ fill: '#6b7280', fontSize: 11 }} tickFormatter={(v) => v.toFixed(2)} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
                             <Tooltip content={<CustomTooltip />} />
-                            {anomalyZones.map((zone, idx) => (
-                                <ReferenceArea key={idx} x1={zone.startDate} x2={zone.endDate} fill={zone.sentiment === 'positive' ? 'rgba(16, 185, 129, 0.15)' : zone.sentiment === 'negative' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(139, 92, 246, 0.15)'} fillOpacity={1} stroke={zone.sentiment === 'positive' ? '#10b981' : zone.sentiment === 'negative' ? '#ef4444' : '#8b5cf6'} strokeOpacity={0.5} onMouseEnter={() => setActiveZone(zone)} onMouseLeave={() => setActiveZone(null)} className="cursor-pointer transition-all duration-300" />
-                            ))}
+                            <Tooltip content={<CustomTooltip />} />
+                            {visibleZones.map((zone, idx) => {
+                                const isRaw = trendAlgo === 'plr';
+                                const isPositive = zone.sentiment === 'positive';
+                                const fill = isRaw ? 'transparent' : (isPositive ? 'rgba(16, 185, 129, 0.15)' : zone.sentiment === 'negative' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(139, 92, 246, 0.15)');
+                                const stroke = isPositive ? '#10b981' : zone.sentiment === 'negative' ? '#ef4444' : '#8b5cf6';
+                                return (
+                                    <ReferenceArea key={idx} x1={zone.startDate} x2={zone.endDate} fill={fill} fillOpacity={1} stroke={stroke} strokeOpacity={0.5} onMouseEnter={() => setActiveZone(zone)} onMouseLeave={() => setActiveZone(null)} className="cursor-pointer transition-all duration-300" />
+                                )
+                            })}
                             {selectedDate && <ReferenceLine x={selectedDate} stroke="#8b5cf6" strokeDasharray="5 5" strokeWidth={2} />}
                             <Area type="monotone" dataKey="close" stroke="#8b5cf6" strokeWidth={2} fill="url(#colorCloseViolet)" dot={(props) => {
                                 const { cx, cy, payload } = props;
@@ -339,6 +373,11 @@ export function StockWidget({ ticker, title }: StockWidgetProps) {
                         </AreaChart>
                     </ResponsiveContainer>
                 )}
+            </div>
+
+            {/* Controls */}
+            <div className="flex items-center gap-2 mb-3">
+                <ToggleGroup value={trendAlgo} onChange={setTrendAlgo} />
             </div>
 
             {/* 浮动卡片 */}

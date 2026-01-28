@@ -15,9 +15,21 @@ from typing import Dict, Any, Optional, List
 from datetime import datetime
 from scipy import stats
 
+from app.agents import InfluenceSummaryAgent
+
 
 class InfluenceAnalyzer:
     """多因素影响力分析器"""
+    
+    # 类级别的 Agent 实例
+    _summary_agent = None
+    
+    @classmethod
+    def _get_summary_agent(cls):
+        """获取摘要生成 Agent 实例（单例模式）"""
+        if cls._summary_agent is None:
+            cls._summary_agent = InfluenceSummaryAgent()
+        return cls._summary_agent
     
     @staticmethod
     def analyze_factors_influence(
@@ -131,14 +143,14 @@ class InfluenceAnalyzer:
         # 生成影响力排行榜
         ranking = InfluenceAnalyzer._generate_ranking(factors_result)
         
-        # 生成分析摘要
-        summary = InfluenceAnalyzer._generate_summary(factors_result, ranking)
-        
         # 获取时间范围
         time_range = {
             'start': merged_df['ds'].min().strftime('%Y-%m-%d'),
             'end': merged_df['ds'].max().strftime('%Y-%m-%d')
         }
+        
+        # 生成分析摘要
+        summary = InfluenceAnalyzer._generate_summary(factors_result, ranking, merged_df, time_range)
         
         # 计算总体得分（过滤掉NaN值）
         valid_scores = [
@@ -312,16 +324,100 @@ class InfluenceAnalyzer:
         return ranking
     
     @staticmethod
+    def _analyze_time_period_changes(
+        merged_df: pd.DataFrame,
+        factor_name: str,
+        window_size: int = 14
+    ) -> Optional[Dict[str, Any]]:
+        """
+        分析指定因子在不同时间段的变化，找出变化最显著的时间段
+        
+        Args:
+            merged_df: 合并后的数据框，包含 ds, y 和各个因子列
+            factor_name: 因子名称（temperature, humidity, season, industry_structure）
+            window_size: 时间窗口大小（天数）
+            
+        Returns:
+            包含时间段起止日期、因子变化、供电量变化、变化幅度的字典，如果数据不足则返回None
+        """
+        if merged_df is None or merged_df.empty or len(merged_df) < window_size:
+            return None
+        
+        # 因子列名映射
+        factor_column_map = {
+            'temperature': 'temperature',
+            'humidity': 'humidity',
+            'season': 'season',
+            'industry_structure': 'industry_structure'
+        }
+        
+        factor_col = factor_column_map.get(factor_name)
+        if factor_col is None or factor_col not in merged_df.columns:
+            return None
+        
+        # 确保数据按日期排序
+        df_sorted = merged_df.sort_values('ds').copy()
+        
+        # 使用滑动窗口分析（窗口大小window_size，步长window_size//2）
+        step_size = max(window_size // 2, 1)
+        max_change_score = -1
+        best_period = None
+        
+        for start_idx in range(0, len(df_sorted) - window_size + 1, step_size):
+            end_idx = start_idx + window_size
+            
+            window_df = df_sorted.iloc[start_idx:end_idx]
+            
+            # 计算窗口内的均值
+            factor_start = window_df[factor_col].iloc[:window_size//2].mean()
+            factor_end = window_df[factor_col].iloc[window_size//2:].mean()
+            power_start = window_df['y'].iloc[:window_size//2].mean()
+            power_end = window_df['y'].iloc[window_size//2:].mean()
+            
+            # 计算变化
+            factor_change = factor_end - factor_start
+            power_change = power_end - power_start
+            factor_change_pct = abs(factor_change / factor_start * 100) if factor_start != 0 else 0
+            # power_change_pct 保留符号，用于判断增减方向
+            power_change_pct = (power_change / power_start * 100) if power_start != 0 else 0
+            
+            # 计算变化得分（因子变化和供电量变化的综合）
+            # 如果相关性为负，因子变化和供电量变化应该反向
+            change_score = abs(factor_change_pct) * abs(power_change_pct)
+            
+            if change_score > max_change_score and abs(factor_change_pct) > 5:  # 至少5%的变化
+                max_change_score = change_score
+                best_period = {
+                    'start_date': window_df['ds'].iloc[0],
+                    'end_date': window_df['ds'].iloc[-1],
+                    'factor_start': factor_start,
+                    'factor_end': factor_end,
+                    'factor_change': factor_change,
+                    'factor_change_pct': factor_change_pct,
+                    'power_start': power_start,
+                    'power_end': power_end,
+                    'power_change': power_change,
+                    'power_change_pct': power_change_pct,
+                    'change_score': change_score
+                }
+        
+        return best_period
+    
+    @staticmethod
     def _generate_summary(
         factors_result: Dict[str, Dict],
-        ranking: List[Dict[str, Any]]
+        ranking: List[Dict[str, Any]],
+        merged_df: Optional[pd.DataFrame] = None,
+        time_range: Optional[Dict[str, str]] = None
     ) -> str:
         """
-        生成分析摘要
+        生成分析摘要（使用LLM生成）
         
         Args:
             factors_result: 因子分析结果字典
             ranking: 影响力排行榜
+            merged_df: 合并后的数据框（可选），如果提供则生成更详细的摘要
+            time_range: 时间范围字典，包含 'start' 和 'end'
             
         Returns:
             分析摘要文本
@@ -339,9 +435,71 @@ class InfluenceAnalyzer:
             return "数据不足，无法生成分析摘要"
         
         top_factor = valid_ranking[0]
+        factor_name = top_factor['factor']
         factor_name_cn = top_factor['factor_name_cn']
-        influence_score = top_factor['influence_score']
-        correlation = top_factor['correlation']
+        
+        # 准备时间段变化信息
+        period_info = None
+        if merged_df is not None and not merged_df.empty:
+            period_info = InfluenceAnalyzer._analyze_time_period_changes(
+                merged_df, factor_name, window_size=14
+            )
+            # 添加因子名称到 period_info，供 Agent 使用
+            if period_info:
+                period_info['factor_name'] = factor_name
+        
+        # 准备时间范围（如果没有提供，尝试从 merged_df 获取）
+        if time_range is None:
+            if merged_df is not None and not merged_df.empty:
+                time_range = {
+                    'start': merged_df['ds'].min().strftime('%Y-%m-%d'),
+                    'end': merged_df['ds'].max().strftime('%Y-%m-%d')
+                }
+            else:
+                time_range = {'start': '未知', 'end': '未知'}
+        
+        # 尝试使用 LLM 生成摘要
+        try:
+            agent = InfluenceAnalyzer._get_summary_agent()
+            summary = agent.generate_summary(
+                time_range=time_range,
+                ranking=valid_ranking,
+                period_info=period_info,
+                factor_name_cn=factor_name_cn
+            )
+            
+            if summary and summary.strip():
+                return summary.strip()
+        except Exception as e:
+            print(f"[InfluenceAnalyzer] LLM 生成摘要失败: {e}")
+        
+        # Fallback: 使用简化的固定逻辑
+        return InfluenceAnalyzer._generate_summary_fallback(valid_ranking, period_info, factor_name_cn)
+    
+    @staticmethod
+    def _generate_summary_fallback(
+        valid_ranking: List[Dict[str, Any]],
+        period_info: Optional[Dict[str, Any]] = None,
+        factor_name_cn: Optional[str] = None
+    ) -> str:
+        """
+        生成摘要的 fallback 方法（简化逻辑）
+        
+        Args:
+            valid_ranking: 有效的因子排行榜
+            period_info: 时间段变化信息（可选）
+            factor_name_cn: 主要因子中文名称（可选）
+            
+        Returns:
+            简化的摘要文本
+        """
+        if not valid_ranking:
+            return "数据不足，无法生成分析摘要"
+        
+        top_factor = valid_ranking[0]
+        factor_name_cn_val = factor_name_cn or top_factor.get('factor_name_cn', '未知因子')
+        influence_score = top_factor.get('influence_score', 0)
+        correlation = top_factor.get('correlation', 0)
         
         # 判断相关性方向
         if correlation > 0.3:
@@ -352,16 +510,34 @@ class InfluenceAnalyzer:
             direction = "相关性较弱"
         
         summary_parts = [
-            f"在分析的时间段内，{factor_name_cn}对供电需求的影响最为显著（影响力得分：{influence_score:.2f}），"
+            f"在分析的时间段内，{factor_name_cn_val}对供电需求的影响最为显著（影响力得分：{influence_score:.2f}），"
             f"与供电需求呈{direction}关系（相关系数：{correlation:.3f}）。"
         ]
         
+        # 如果有时间段变化信息，添加简要描述
+        if period_info:
+            try:
+                start_date_str = period_info['start_date'].strftime('%Y-%m-%d') if hasattr(period_info.get('start_date', ''), 'strftime') else str(period_info.get('start_date', ''))
+                end_date_str = period_info['end_date'].strftime('%Y-%m-%d') if hasattr(period_info.get('end_date', ''), 'strftime') else str(period_info.get('end_date', ''))
+                power_start = period_info.get('power_start', 0)
+                power_end = period_info.get('power_end', 0)
+                power_change = period_info.get('power_change', 0)
+                
+                if power_change > 0:
+                    power_desc = f"供电需求从{power_start:.0f}MW增至{power_end:.0f}MW（增加{power_change:.0f}MW）"
+                else:
+                    power_desc = f"供电需求从{power_start:.0f}MW降至{power_end:.0f}MW（减少{abs(power_change):.0f}MW）"
+                
+                summary_parts.insert(1, f"在{start_date_str}至{end_date_str}期间，{power_desc}，")
+            except Exception:
+                pass  # 如果格式化失败，跳过时间段信息
+        
         # 添加其他重要因子
-        if len(ranking) > 1:
-            second_factor = ranking[1]
-            if second_factor['influence_score'] > 0.3:
+        if len(valid_ranking) > 1:
+            second_factor = valid_ranking[1]
+            if second_factor.get('influence_score', 0) > 0.3:
                 summary_parts.append(
-                    f"{second_factor['factor_name_cn']}的影响次之（影响力得分：{second_factor['influence_score']:.2f}）。"
+                    f"{second_factor.get('factor_name_cn', '未知因子')}的影响次之（影响力得分：{second_factor.get('influence_score', 0):.2f}）。"
                 )
         
         return "".join(summary_parts)

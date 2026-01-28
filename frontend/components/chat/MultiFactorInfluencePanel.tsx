@@ -129,13 +129,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
               多因素相关性分析
             </h3>
           </div>
-          {time_range.start && time_range.end && (
-            <div className="flex items-center gap-2 text-sm text-gray-400 ml-7">
-              <span className="px-2 py-0.5 bg-dark-700/50 rounded border border-white/5">
-                {time_range.start} ~ {time_range.end}
-              </span>
-            </div>
-          )}
+          {/* 时间段显示已隐藏，避免暴露具体的时间范围 */}
         </div>
       </div>
 

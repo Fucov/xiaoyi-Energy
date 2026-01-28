@@ -168,6 +168,7 @@ async def search_web(
             start_date=start_date,
             end_date=end_date,
             max_results=max_results,
+            country="china",  # 限制为中国地区
         )
         print(f"[Search] 网络搜索时间范围: {start_date} ~ {end_date}")
         return result.get("results", [])
@@ -259,6 +260,7 @@ async def search_news_around_date(
             start_date=start_date,
             end_date=end_date,
             max_results=max_results,
+            country="china",  # 限制为中国地区
         )
         print(f"[Search] Historical search for {target_date} ({start_date}~{end_date})")
         return result.get("results", [])

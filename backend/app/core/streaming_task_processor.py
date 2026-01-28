@@ -44,6 +44,7 @@ from app.agents import (
     NewsSummaryAgent,
     PredictionAnalysisAgent,
 )
+from app.services.trend_service import TrendService
 
 # Data clients
 from app.data.rag_searcher import RAGSearcher
@@ -562,7 +563,7 @@ class StreamingTaskProcessor:
 
             # === Redis 全局缓存检查 ===
             redis_client = get_redis()
-            cache_key = f"power_zones:{region_code}"
+            cache_key = f"power_zones_v3:{region_code}"
             cached_zones_json = None
 
             try:
@@ -579,11 +580,134 @@ class StreamingTaskProcessor:
 
             # 如果缓存不存在，计算并保存
             if not cached_zones_json:
-                # 使用动态聚类服务
-                clustering_service = StockSignalService(lookback=60, max_zone_days=10)
-                anomaly_zones = clustering_service.generate_zones(sig_df, news_counts)
+                # 1. Trend Analysis (Regime Segmentation)
+                trend_service = TrendService()
+                # Use all methods but prefer PLR for visual zones
+                trend_results = trend_service.analyze_trend(sig_df, method="plr")
 
-                print(f"[AnomalyZones] ⚙️ Generated {len(anomaly_zones)} zones")
+                # Debug Prints for Trend Algorithms
+                print("\n" + "=" * 50)
+                plr_list = trend_results.get("plr", [])
+                print(
+                    f"\n📈 [ALGO 3/6] Bottom-Up PLR: Found {len(plr_list)} segments. Verifying Continuity:"
+                )
+                for i, seg in enumerate(plr_list):
+                    print(
+                        f"   [{i}] {seg['startDate']} -> {seg['endDate']} ({seg['direction']})"
+                    )
+                print("=" * 50 + "\n")
+
+                # Map PLR segments to anomaly_zones format expected by frontend
+                plr_segments = trend_results.get("plr", [])
+
+                # Combine all segments for frontend selection
+                all_segments = []
+                all_segments.extend(plr_segments)
+
+                # NEW: Generate Semantic Broad Regimes (Merged PLR)
+                # This creates broad "Event Flow" phases
+                semantic_raw = trend_service.process_semantic_regimes(
+                    plr_segments, min_duration_days=7
+                )
+
+                # Process semantic zones
+                semantic_zones = []
+                for seg in semantic_raw:
+                    # Determine sentiment/color
+                    sentiment = "neutral"
+                    direction = seg.get("direction", "").lower()
+                    seg_type = seg.get("type", "").lower()
+
+                    if direction == "up" or seg_type == "bull":
+                        sentiment = "positive"
+                    elif direction == "down" or seg_type == "bear":
+                        sentiment = "negative"
+
+                    # Calculate return
+                    try:
+                        start_p = float(seg.get("startPrice", 0))
+                        end_p = float(seg.get("endPrice", 0))
+                        change_pct = (end_p - start_p) / start_p if start_p else 0
+                    except:
+                        change_pct = 0
+
+                    semantic_zones.append(
+                        {
+                            "startDate": seg["startDate"],
+                            "endDate": seg["endDate"],
+                            "avg_return": change_pct,
+                            "avg_score": abs(change_pct) * 10,
+                            "zone_type": "semantic_regime",
+                            "method": "plr_merged",
+                            "sentiment": sentiment,
+                            "summary": f"{seg.get('direction', seg.get('type', 'Phase')).title()} ({change_pct * 100:.1f}%)",
+                            "description": f"Phase from {seg['startDate']} to {seg['endDate']}. Return: {change_pct * 100:.1f}%",
+                            "type": seg_type,
+                            "normalizedType": seg_type,
+                            "direction": direction,
+                            "events": [],  # Placeholder for events
+                        }
+                    )
+
+                # Process raw segments (anomaly_zones)
+                anomaly_zones = []
+                for seg in all_segments:
+                    # Determine sentiment/color
+                    sentiment = "neutral"
+                    direction = seg.get("direction", "").lower()
+                    seg_type = seg.get("type", "").lower()
+
+                    if direction == "up" or seg_type == "bull":
+                        sentiment = "positive"
+                    elif direction == "down" or seg_type == "bear":
+                        sentiment = "negative"
+
+                    # Calculate simple impact/score
+                    start_p = seg.get("startPrice", seg.get("avgPrice", 1.0))
+                    end_p = seg.get("endPrice", seg.get("avgPrice", 1.0))
+                    change_pct = (end_p - start_p) / start_p if start_p else 0
+
+                    anomaly_zones.append(
+                        {
+                            "startDate": seg["startDate"],
+                            "endDate": seg["endDate"],
+                            "avg_return": change_pct,
+                            "avg_score": abs(change_pct) * 10,
+                            "zone_type": "trend_segment",
+                            "method": seg.get("method", "plr"),
+                            "sentiment": sentiment,
+                            "summary": f"{seg.get('direction', seg.get('type', 'Trend')).title()} ({change_pct * 100:.1f}%)",
+                            "description": f"Trend detected from {seg['startDate']} to {seg['endDate']}. Return: {change_pct * 100:.1f}%",
+                            "type": seg_type,
+                            "normalizedType": seg_type,
+                            "direction": direction,
+                        }
+                    )
+
+                # Merge semantic zones into anomaly_zones
+                anomaly_zones.extend(semantic_zones)
+
+                # Also keep StockSignalService for consistency if needed, but for now we replace the main logic
+                # or we can append significant points differently.
+                # For this task, we focus on TrendService, but let's keep the existing generated zones logic as specific method 'clustering'?
+                # Actually, the user wants to REPLACE/MIGRATE features.
+                # Let's keep the old one as "clustering" method if desired, but here we just use TrendService results.
+                # However, to avoid losing functionality, we might want to run ClusteringService too?
+                # The Plan says "Combine these with existing StockSignalService results or structure them".
+
+                # Let's run StockSignalService as well for 'clustering' method
+                clustering_service = StockSignalService(lookback=60, max_zone_days=10)
+                clustering_zones = clustering_service.generate_zones(
+                    sig_df, news_counts
+                )
+                for z in clustering_zones:
+                    z["method"] = "clustering"
+
+                anomaly_zones.extend(clustering_zones)
+
+                print(
+                    f"[AnomalyZones] ⚙️ Generated {len(anomaly_zones)} zones (PLR + Semantic + Clustering)"
+                )
 
             # 为每个区域生成事件摘要（即使是从缓存读取的也可以重新生成，或者仅当未缓存时生成）
             if anomaly_zones and not cached_zones_json:
@@ -707,14 +831,19 @@ class StreamingTaskProcessor:
             f"[Influence] 准备分析影响因子，供电数据: {len(df) if df is not None else 0} 条，天气数据: {len(weather_df) if weather_df is not None else 0} 条"
         )
         influence_result = await self._step_influence_analysis(
-            df, weather_df, event_queue, message, region_match.region_info if region_match else None
+            df,
+            weather_df,
+            event_queue,
+            message,
+            region_match.region_info if region_match else None,
         )
-        print(f"[Influence] 影响因子分析完成，结果: {influence_result}")
+        # print(f"[Influence] 影响因子分析完成，结果: {influence_result}")
 
         # 保存影响因子数据（兼容原有emotion字段）
         message.save_emotion(
             influence_result.get("overall_score", 0),
-            influence_result.get("summary") or influence_result.get("description", "影响因素分析")
+            influence_result.get("summary")
+            or influence_result.get("description", "影响因素分析"),
         )
 
         await self._emit_event(
@@ -1227,7 +1356,7 @@ class StreamingTaskProcessor:
         region_info: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """多因素影响力分析（替代情绪分析）"""
-        
+
         # 如果没有供电数据或天气数据，返回默认值
         if power_df is None or power_df.empty or weather_df is None or weather_df.empty:
             default_result = InfluenceAnalyzer._get_default_result()
@@ -1243,23 +1372,23 @@ class StreamingTaskProcessor:
                 },
             )
             return default_result
-        
+
         # 获取日期范围
-        start_date = power_df['ds'].min()
-        end_date = power_df['ds'].max()
-        
+        start_date = power_df["ds"].min()
+        end_date = power_df["ds"].max()
+
         # 标准化日期格式（移除时区）
-        if hasattr(start_date, 'tz') and start_date.tz is not None:
+        if hasattr(start_date, "tz") and start_date.tz is not None:
             start_date = start_date.tz_localize(None)
-        if hasattr(end_date, 'tz') and end_date.tz is not None:
+        if hasattr(end_date, "tz") and end_date.tz is not None:
             end_date = end_date.tz_localize(None)
-        
-        start_date_str = start_date.strftime('%Y-%m-%d')
-        end_date_str = end_date.strftime('%Y-%m-%d')
-        
+
+        start_date_str = start_date.strftime("%Y-%m-%d")
+        end_date_str = end_date.strftime("%Y-%m-%d")
+
         # 创建空的节假日数据（已废弃，保留以兼容接口）
-        holiday_df = pd.DataFrame(columns=['date', 'is_holiday', 'holiday_score'])
-        
+        holiday_df = pd.DataFrame(columns=["date", "is_holiday", "holiday_score"])
+
         # 获取城市工业结构数据
         industry_structure_ratio = 0.3  # 默认值（全国平均工业结构比例约30%）
         if region_info and region_info.region_name:
@@ -1268,43 +1397,54 @@ class StreamingTaskProcessor:
                 # 调用LLM获取城市工业结构数据（非async函数，使用线程执行）
                 structure_data = await asyncio.to_thread(
                     industry_structure_client.fetch_industry_structure_data,
-                    region_info.region_name
+                    region_info.region_name,
                 )
-                industry_structure_ratio = structure_data.get('second_industry_ratio', 0.3)
-                print(f"[Influence] 获取城市工业结构数据: {region_info.region_name}, 比例={industry_structure_ratio:.2%}")
+                industry_structure_ratio = structure_data.get(
+                    "second_industry_ratio", 0.3
+                )
+                print(
+                    f"[Influence] 获取城市工业结构数据: {region_info.region_name}, 比例={industry_structure_ratio:.2%}"
+                )
             except Exception as e:
                 print(f"[Influence] 获取城市工业结构数据失败: {e}，使用默认值0.3")
         else:
             print(f"[Influence] 未提供城市名称，使用默认工业结构比例0.3")
-        
+
         # 计算影响因子（使用新方法）
         influence_result = await asyncio.to_thread(
             InfluenceAnalyzer.analyze_factors_influence,
             power_df,
             weather_df,
             holiday_df,
-            industry_structure_ratio
+            industry_structure_ratio,
         )
-        
+
         # 计算总体得分（各因素影响力得分的平均值，过滤NaN值）
-        if influence_result.get('ranking'):
+        if influence_result.get("ranking"):
             valid_scores = [
-                factor['influence_score'] 
-                for factor in influence_result['ranking']
-                if not (np.isnan(factor.get('influence_score', np.nan)) or np.isinf(factor.get('influence_score', np.nan)))
+                factor["influence_score"]
+                for factor in influence_result["ranking"]
+                if not (
+                    np.isnan(factor.get("influence_score", np.nan))
+                    or np.isinf(factor.get("influence_score", np.nan))
+                )
             ]
             overall_score = np.mean(valid_scores) if valid_scores else 0.0
         else:
             overall_score = 0.0
-        
+
         # 确保overall_score不是NaN
         if np.isnan(overall_score) or np.isinf(overall_score):
             overall_score = 0.0
-        
+
         influence_result["overall_score"] = round(float(overall_score), 4)
-        
-        # 发送影响因子数据
-        print(f"[Influence] 发送影响因子数据: {len(influence_result.get('ranking', []))} 个因子")
+
+        # 保存影响因子数据到 Redis
+        message.save_influence_analysis(influence_result)
+
+        print(
+            f"[Influence] 发送影响因子数据: {len(influence_result.get('ranking', []))} 个因子"
+        )
         await self._emit_event(
             event_queue,
             message,
@@ -1314,7 +1454,7 @@ class StreamingTaskProcessor:
                 "data": influence_result,
             },
         )
-        print(f"[Influence] 影响因子数据已发送")
+        print(f"[Influence] 影响因子数据已发送并保存到Redis")
 
         return influence_result
 
@@ -1500,7 +1640,7 @@ class StreamingTaskProcessor:
         self, event_queue: asyncio.Queue | None, message: Message, event: Dict
     ):
         """发送事件到队列、PubSub 和 Stream"""
-        
+
         # 清理NaN值以便JSON序列化
         event_clean = self._clean_nan_values(event)
 
