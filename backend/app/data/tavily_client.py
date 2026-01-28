@@ -23,6 +23,23 @@ CN_FINANCE_DOMAINS = [
     "cs.com.cn",         # 中证网
 ]
 
+# 中国新闻网站域名（天气/电力相关）
+CN_NEWS_DOMAINS = [
+    "eastmoney.com",     # 东方财富
+    "sina.com.cn",       # 新浪财经
+    "163.com",           # 网易财经
+    "qq.com",            # 腾讯财经
+    "people.com.cn",     # 人民网
+    "xinhuanet.com",     # 新华网
+    "chinanews.com.cn",  # 中国新闻网
+    "weather.com.cn",    # 中国天气网
+    "weather.gov.cn",    # 中国气象局
+    "bjx.com.cn",        # 北极星电力网
+    "in-en.com",         # 国际能源网
+    "cec.org.cn",        # 中国电力企业联合会
+    "cet.com.cn",        # 中国电力新闻网
+]
+
 
 class TavilyNewsClient:
     """Tavily 新闻搜索客户端"""
@@ -39,13 +56,17 @@ class TavilyNewsClient:
         max_results: int = 10,
         search_depth: str = "advanced",  # "basic" 或 "advanced"
         include_domains: Optional[List[str]] = None,
+        country: Optional[str] = None,     # 国家代码，如 "china"（仅在 topic="general" 时可用）
     ) -> Dict:
         # 构建搜索参数
+        # 如果指定了 country 参数，必须使用 topic="general"（country 参数只在 general 时可用）
+        topic = "general" if country else "news"
+        
         search_params = {
             "query": query,
             "search_depth": search_depth,
             "max_results": max_results,
-            "topic": "news",  # 限定为新闻搜索
+            "topic": topic,
         }
 
         # 时间过滤：优先使用 start_date/end_date，其次降级到 days
@@ -61,6 +82,10 @@ class TavilyNewsClient:
         # 域名过滤
         if include_domains:
             search_params["include_domains"] = include_domains
+        
+        # 国家/区域过滤（仅在 topic="general" 时可用）
+        if country:
+            search_params["country"] = country.lower()
 
         try:
             response = self.client.search(**search_params)
@@ -115,6 +140,7 @@ class TavilyNewsClient:
         end_date: Optional[str] = None,    # 格式: YYYY-MM-DD
         days: int = 30,                    # 保留作为 fallback，当 start_date/end_date 未指定时使用
         max_results: int = 10,
+        country: Optional[str] = "china",  # 默认限制为中国地区
     ) -> Dict:
         """
         搜索天气/电力相关新闻
@@ -125,6 +151,7 @@ class TavilyNewsClient:
             end_date: 结束日期
             days: 天数
             max_results: 最大结果数
+            country: 国家代码，默认 "china" 限制为中国地区
         
         Returns:
             搜索结果字典
@@ -132,7 +159,9 @@ class TavilyNewsClient:
         # 构建搜索查询：搜索天气相关关键词（寒潮、高温、电力等）
         query = f"{region_name} 天气 寒潮 高温 电力 供电"
         
-        # 使用通用搜索，不限制域名（天气新闻可能来自多个来源）
+        # 使用通用搜索，限制为中国地区
+        # 如果指定了 country，会使用 topic="general" 以支持 country 参数
+        # 同时也可以使用 include_domains 进一步限制中国新闻网站
         return self.search(
             query=query,
             start_date=start_date,
@@ -140,5 +169,6 @@ class TavilyNewsClient:
             days=days if not start_date and not end_date else None,
             max_results=max_results,
             search_depth="advanced",
-            include_domains=None,  # 不限制域名，获取更广泛的天气新闻
+            include_domains=CN_NEWS_DOMAINS if country == "china" else None,  # 限制中国新闻网站域名
+            country=country,  # 使用 country 参数限制区域
         )

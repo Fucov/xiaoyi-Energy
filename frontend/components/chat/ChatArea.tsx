@@ -149,8 +149,8 @@ export const PREDICTION_STEPS: Omit<Step, 'status' | 'message'>[] = [
 const defaultQuickSuggestions = [
   '预测北京未来30天的供电需求',
   '分析上海最近用电量趋势',
-  '查看广州的天气对供电的影响',
-  '生成一份供电需求分析报告',
+  '查看南京的天气对供电的影响',
+  '生成一份北京过去30天供电需求分析报告',
 ]
 
 interface ChatAreaProps {
@@ -882,12 +882,11 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       contents.push({
         type: 'table',
         title: '', // 标题由外层MessageBubble显示"相关新闻"，这里不重复显示
-        headers: ['标题', '来源', '时间'],
+        headers: ['标题', '来源'],
         rows: data.news_list.slice(0, 10).map((news) => [
           // 如果有 URL，使用 markdown 链接格式 [标题](url)；否则只显示标题
           news.url ? `[${news.summarized_title}](${news.url})` : news.summarized_title,
           news.source_name || (news.source_type === 'search' ? '网络' : '资讯'),
-          news.published_date
         ])
       })
     }
@@ -1154,11 +1153,10 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         newContents.push({
           type: 'table',
           title: '',
-          headers: ['标题', '来源', '时间'],
+          headers: ['标题', '来源'],
           rows: news.slice(0, 10).map((n) => [
             n.url ? `[${n.summarized_title}](${n.url})` : n.summarized_title,
             n.source_name || (n.source_type === 'search' ? '网络' : '资讯'),
-            n.published_date
           ])
         })
       }
