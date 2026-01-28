@@ -1240,7 +1240,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                         px-4 py-2.5 rounded-lg shadow-2xl max-w-lg
                         animate-in fade-in-0 slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-3">
-              {/* 高影响力标记 */}
+              {/* 高相关性标记 */}
               {(activeZone.impact || 0) > 0.7 && (
                 <span className="text-lg animate-pulse">✨</span>
               )}

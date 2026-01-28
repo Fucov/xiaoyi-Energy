@@ -39,7 +39,9 @@ CITY_BASE_LOADS = {
 
 # 默认配置
 DEFAULT_BASE_LOAD = 10000  # MW
-DEFAULT_TEMP_COEFFICIENT = 0.5  # 温度影响系数
+DEFAULT_TEMP_COEFFICIENT = 0.25  # 温度影响系数（降低以平衡各因子）
+DEFAULT_HUMIDITY_COEFFICIENT = 0.4  # 湿度影响系数
+DEFAULT_SEASON_COEFFICIENT = 0.30  # 季节性位置影响系数
 
 
 def _is_weekend(date: datetime) -> bool:
@@ -74,7 +76,10 @@ def generate_power_demand(
     base_load: float,
     temperature: float,
     date: datetime,
+    humidity: Optional[float] = None,
     temp_coefficient: float = DEFAULT_TEMP_COEFFICIENT,
+    humidity_coefficient: float = DEFAULT_HUMIDITY_COEFFICIENT,
+    season_coefficient: float = DEFAULT_SEASON_COEFFICIENT,
 ) -> float:
     """
     生成供电需求（Mock算法）
@@ -83,7 +88,10 @@ def generate_power_demand(
         base_load: 基础负荷（MW）
         temperature: 当前温度（摄氏度）
         date: 日期
-        temp_coefficient: 温度影响系数（默认0.5）
+        humidity: 当前湿度（百分比，0-100）
+        temp_coefficient: 温度影响系数（默认0.15）
+        humidity_coefficient: 湿度影响系数（默认0.12）
+        season_coefficient: 季节性位置影响系数（默认0.10）
     
     Returns:
         供电需求（MW）
@@ -105,6 +113,20 @@ def generate_power_demand(
     except (ValueError, TypeError):
         temperature = 22  # 如果转换失败，使用默认值
     
+    # 处理湿度缺失值
+    if humidity is None:
+        humidity = 50  # 使用舒适湿度作为默认值
+    
+    if pd.isna(humidity) or (isinstance(humidity, float) and math.isnan(humidity)):
+        humidity = 50
+    
+    try:
+        humidity = float(humidity)
+        if math.isnan(humidity):
+            humidity = 50
+    except (ValueError, TypeError):
+        humidity = 50
+    
     # 舒适温度范围：18-26度
     comfort_temp = 22
     
@@ -112,14 +134,44 @@ def generate_power_demand(
     temp_diff = abs(temperature - comfort_temp)
     temp_impact = temp_coefficient * temp_diff ** 2
     
+    # 舒适湿度范围：40-60%
+    comfort_humidity_min = 40
+    comfort_humidity_max = 60
+    comfort_humidity_center = 50
+    
+    # 湿度影响（二次函数，极端湿度影响更大）
+    if humidity < comfort_humidity_min:
+        # 低湿度：偏离舒适中心
+        humidity_diff = comfort_humidity_min - humidity
+    elif humidity > comfort_humidity_max:
+        # 高湿度：偏离舒适中心
+        humidity_diff = humidity - comfort_humidity_max
+    else:
+        # 舒适范围内：影响较小
+        humidity_diff = abs(humidity - comfort_humidity_center) / 2
+    
+    humidity_impact = humidity_coefficient * humidity_diff ** 2
+    
+    # 计算季节性位置（day_of_year / 365.0，作为连续变量）
+    day_of_year = date.timetuple().tm_yday
+    season_position = day_of_year / 365.0  # 0.0-1.0之间的连续值
+    
+    # 季节性位置影响：使用正弦函数模拟季节性变化
+    # 夏季（0.5附近，即年中）和冬季（0.0和1.0附近）用电高峰
+    # 使用 sin(2π * season_position - π/2) + 1 使得值在0-2之间，然后归一化
+    season_cycle = np.sin(2 * np.pi * season_position - np.pi / 2) + 1  # 0-2之间
+    season_impact = season_coefficient * season_cycle * 50  # 放大影响
+    
     # 工作日系数
     weekday_factor = 1.0 if not _is_weekend(date) else 0.85
     
-    # 季节性因子
-    season_factor = _get_season_factor(date)
-    
-    # 计算最终需求
-    demand = base_load * season_factor * weekday_factor + temp_impact * 100
+    # 计算最终需求：基础负荷 + 各因子影响
+    demand = (
+        base_load * weekday_factor +
+        temp_impact * 100 +
+        humidity_impact * 100 +
+        season_impact
+    )
     
     # 添加一些随机波动（±5%）
     noise = np.random.normal(0, 0.02)  # 2%标准差
@@ -160,6 +212,28 @@ class PowerDataFetcher:
             except ValueError:
                 pass
         return DEFAULT_TEMP_COEFFICIENT
+    
+    def _get_humidity_coefficient(self) -> float:
+        """获取湿度影响系数"""
+        import os
+        env_value = os.getenv("POWER_HUMIDITY_COEFFICIENT")
+        if env_value:
+            try:
+                return float(env_value)
+            except ValueError:
+                pass
+        return DEFAULT_HUMIDITY_COEFFICIENT
+    
+    def _get_season_coefficient(self) -> float:
+        """获取季节性位置影响系数"""
+        import os
+        env_value = os.getenv("POWER_SEASON_COEFFICIENT")
+        if env_value:
+            try:
+                return float(env_value)
+            except ValueError:
+                pass
+        return DEFAULT_SEASON_COEFFICIENT
 
     async def fetch_power_data(
         self,
@@ -240,6 +314,8 @@ class PowerDataFetcher:
         # 获取基础负荷和系数
         base_load = self._get_base_load(city_name)
         temp_coefficient = self._get_temp_coefficient()
+        humidity_coefficient = self._get_humidity_coefficient()
+        season_coefficient = self._get_season_coefficient()
 
         # 生成供电需求数据
         power_demands = []
@@ -261,17 +337,28 @@ class PowerDataFetcher:
                 print(f"[PowerData] 警告: 日期 {date.date()} 的温度数据缺失，跳过")
                 continue
             
+            # 获取湿度数据
+            humidity = row.get("humidity")
+            if pd.isna(humidity):
+                humidity = None  # 传递给函数处理默认值
+            
             # 只生成指定日期范围内的数据
             if start_dt <= date <= end_dt:
                 try:
                     demand = generate_power_demand(
-                        base_load, temperature, date, temp_coefficient
+                        base_load=base_load,
+                        temperature=temperature,
+                        date=date,
+                        humidity=humidity,
+                        temp_coefficient=temp_coefficient,
+                        humidity_coefficient=humidity_coefficient,
+                        season_coefficient=season_coefficient,
                     )
                     power_demands.append({
                         "ds": date,
                         "y": demand,
                         "temperature": float(temperature),
-                        "humidity": float(row.get("humidity", 0)) if not pd.isna(row.get("humidity")) else 0,
+                        "humidity": float(humidity) if humidity is not None and not pd.isna(humidity) else 50.0,
                     })
                 except Exception as e:
                     print(f"[PowerData] 警告: 生成日期 {date.date()} 的供电需求失败: {e}")

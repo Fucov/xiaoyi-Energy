@@ -138,7 +138,7 @@ export interface MessageData {
   emotion: number | null
   emotion_des: string | null
   
-  // 多因素影响力分析（新）
+  // 多因素相关性分析（新）
   influence_analysis: InfluenceAnalysisResult | null
 
   // 异常区域（关键转折点标注）

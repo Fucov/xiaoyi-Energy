@@ -16,7 +16,7 @@ interface MessageBubbleProps {
   onRegenerateMessage?: () => void
 }
 
-// 多因素影响力轴组件
+// 多因素相关性轴组件
 function MultiFactorInfluenceAxis({ 
   influenceData 
 }: { 
@@ -33,19 +33,19 @@ function MultiFactorInfluenceAxis({
     return (
       <div className="text-sm text-gray-400 flex items-center gap-2">
         <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-        <span>影响因素分析中...</span>
+        <span>相关性分析中...</span>
       </div>
     )
   }
 
   const factors = [
     { 
-      label: '温度影响', 
+      label: '温度相关性', 
       value: influenceData.temperature_influence ?? 0.5,
       color: 'bg-cyan-400'
     },
     { 
-      label: '湿度影响', 
+      label: '湿度相关性', 
       value: influenceData.humidity_influence ?? 0.3,
       color: 'bg-purple-400'
     },
@@ -68,7 +68,7 @@ function MultiFactorInfluenceAxis({
 
   return (
     <div className="space-y-4">
-      {/* 多因素影响力轴 */}
+      {/* 多因素相关性轴 */}
       <div className="space-y-3">
         {factors.map((factor, index) => (
           <div key={index} className="space-y-1">
@@ -442,23 +442,23 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     "space-y-4",
                     message.isCollapsing && "animate-collapse"
                   )}>
-                    {/* 上半部分：左右分栏 - 多因素影响力分析(1) | 相关新闻+研报(2) */}
+                    {/* 上半部分：左右分栏 - 多因素相关性分析(1) | 相关新闻+研报(2) */}
                     <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">
-                      {/* 左侧：多因素影响力分析 */}
+                      {/* 左侧：多因素相关性分析 */}
                       <div className="glass rounded-2xl p-4">
                         {influenceData ? (
                           <MultiFactorInfluencePanel influenceData={influenceData} />
                         ) : legacyInfluenceData ? (
                           <div>
                             <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                              <span>📊</span> 多因素影响力分析
+                              <span>📊</span> 多因素相关性分析
                             </h3>
                             <MultiFactorInfluenceAxis influenceData={legacyInfluenceData} />
                           </div>
                         ) : emotionData ? (
                           <div className="space-y-3">
                             <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                              <span>📊</span> 影响因素分析
+                              <span>📊</span> 相关性分析
                             </h3>
                             <EmotionGauge emotion={emotionData.score} description="" />
                             {emotionData.description && (
@@ -470,7 +470,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                         ) : (
                           <div className="text-sm text-gray-400 flex items-center gap-2">
                             <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-                            <span>影响因素分析中...</span>
+                            <span>相关性分析中...</span>
                           </div>
                         )}
                       </div>

@@ -62,7 +62,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
             <div className="w-12 h-12 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
             <Sparkles className="w-6 h-6 text-violet-400 absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 animate-pulse" />
           </div>
-          <span className="text-sm text-gray-400">影响因素分析中...</span>
+          <span className="text-sm text-gray-400">相关性分析中...</span>
         </div>
       </div>
     )
@@ -89,7 +89,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
     }
   }, [validFactors, selectedFactor])
 
-  // 准备影响力仪表盘数据（按得分降序）
+  // 准备相关性仪表盘数据（按得分降序）
   const dashboardData = ranking
     .filter(item => {
       const score = item.influence_score
@@ -126,7 +126,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
               <Sparkles className="w-4 h-4 text-violet-400" />
             </div>
             <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent">
-              多因素影响力分析
+              多因素相关性分析
             </h3>
           </div>
           {time_range.start && time_range.end && (
@@ -153,14 +153,14 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
         </div>
       )}
 
-      {/* 影响力仪表盘 */}
+      {/* 相关性仪表盘 */}
       <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 px-1 py-4 border border-white/10 shadow-xl backdrop-blur-sm">
         <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
         <div className="relative">
           <div className="flex items-center justify-center mb-6">
             <div className="flex items-center gap-3">
               <div className="w-1.5 h-6 bg-gradient-to-b from-cyan-400 to-blue-400 rounded-full" />
-              <h4 className="text-lg font-semibold text-gray-200">影响力得分仪表盘</h4>
+              <h4 className="text-lg font-semibold text-gray-200">相关性得分仪表盘</h4>
               <div className="text-xs text-gray-500 px-2.5 py-1 bg-dark-700/50 rounded border border-white/5 ml-2">
                 {dashboardData.length} 个因子
               </div>
@@ -187,7 +187,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                 stroke="#6b7280"
                 tick={{ fill: '#9ca3af', fontSize: 12 }}
                 tickLine={{ stroke: '#4b5563' }}
-                label={{ value: '影响力得分', position: 'insideBottom', offset: -5, fill: '#9ca3af', fontSize: 13 }}
+                label={{ value: '相关性得分', position: 'insideBottom', offset: -5, fill: '#9ca3af', fontSize: 13 }}
                 tickMargin={8}
               />
               <YAxis 
@@ -235,7 +235,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                       <div key="tooltip" className="space-y-1.5">
                         <div className="text-gray-200 font-semibold text-sm">{props.payload.name}</div>
                         <div className="flex items-center gap-2">
-                          <span className="text-cyan-400 font-medium">影响力得分:</span>
+                          <span className="text-cyan-400 font-medium">相关性得分:</span>
                           <span className="text-white font-bold">{value.toFixed(3)}</span>
                         </div>
                         <div className="flex items-center gap-2">
@@ -314,7 +314,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                     </div>
                     <div className="flex flex-col items-end gap-1 flex-shrink-0">
                       <span className={`text-xs font-medium ${isSelected ? 'text-gray-400' : 'text-gray-500'}`}>
-                        影响力得分
+                        相关性得分
                       </span>
                       <div className={`flex items-center gap-1.5 text-sm font-bold ${corrColor}`}>
                         <CorrIcon className="w-4 h-4" />
@@ -348,7 +348,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
             {currentFactor && (
               <div className="flex items-center gap-4">
                 <div className="flex items-center gap-2 px-3 py-1.5 bg-dark-700/50 rounded-lg border border-white/5">
-                  <span className="text-xs text-gray-400">影响力得分</span>
+                  <span className="text-xs text-gray-400">相关性得分</span>
                   <span className="text-sm font-bold text-gray-200">{currentFactor.influence_score.toFixed(3)}</span>
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${

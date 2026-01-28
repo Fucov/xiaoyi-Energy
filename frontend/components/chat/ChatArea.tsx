@@ -398,7 +398,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           accumulatedNews = data as NewsItem[]
           updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
         } else if (dataType === 'influence') {
-          // 多因素影响力数据
+          // 多因素相关性数据
           console.log('[ChatArea] ===== 收到影响因子数据 =====')
           console.log('[ChatArea] Raw data:', data)
           
@@ -411,7 +411,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
             const overallScore = data.overall_score || 0
             accumulatedEmotion = { 
               score: overallScore, 
-              description: data.summary || '影响因素分析' 
+              description: data.summary || '相关性分析' 
             }
           } else {
             // 旧格式：兼容处理
@@ -430,7 +430,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
             const overallScore = influenceData.temperature_influence && influenceData.humidity_influence && influenceData.seasonality_influence && influenceData.trend_influence && influenceData.volatility_influence
               ? (influenceData.temperature_influence + influenceData.humidity_influence + influenceData.seasonality_influence + influenceData.trend_influence + influenceData.volatility_influence) / 5
               : 0
-            accumulatedEmotion = { score: overallScore, description: influenceData.description || '影响因素分析' }
+            accumulatedEmotion = { score: overallScore, description: influenceData.description || '相关性分析' }
           }
           
           console.log('[ChatArea] Calling updateContentsFromStreamData with influence:', accumulatedInfluence)
@@ -1073,7 +1073,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
 
       const newContents: (TextContent | ChartContent | TableContent)[] = []
 
-      // 1. 多因素影响力（优先）或情绪（兼容）
+      // 1. 多因素相关性（优先）或情绪（兼容）
       if (influence) {
         // 使用影响因子数据
         console.log('[ChatArea] updateContentsFromStreamData: Adding influence marker with data:', influence)
