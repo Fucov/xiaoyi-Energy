@@ -58,12 +58,12 @@ export function MessageContent({ content }: MessageContentProps) {
               </strong>
             ),
             // 标题
-            h1: ({ children }) => <h1 className="text-2xl font-bold text-gray-200 mb-3 mt-4 first:mt-0">{children}</h1>,
-            h2: ({ children }) => <h2 className="text-xl font-bold text-gray-200 mb-2 mt-4 first:mt-0">{children}</h2>,
-            h3: ({ children }) => <h3 className="text-lg font-semibold text-gray-200 mb-2 mt-3 first:mt-0">{children}</h3>,
-            h4: ({ children }) => <h4 className="text-base font-semibold text-gray-200 mb-2 mt-3 first:mt-0">{children}</h4>,
-            h5: ({ children }) => <h5 className="text-sm font-semibold text-gray-200 mb-1 mt-2 first:mt-0">{children}</h5>,
-            h6: ({ children }) => <h6 className="text-sm font-medium text-gray-300 mb-1 mt-2 first:mt-0">{children}</h6>,
+            h1: ({ children }) => <h1 className="text-4xl font-bold text-gray-200 mb-4 mt-5 first:mt-0">{children}</h1>,
+            h2: ({ children }) => <h2 className="text-3xl font-bold text-gray-200 mb-3 mt-5 first:mt-0">{children}</h2>,
+            h3: ({ children }) => <h3 className="text-2xl font-semibold text-gray-200 mb-3 mt-4 first:mt-0">{children}</h3>,
+            h4: ({ children }) => <h4 className="text-xl font-semibold text-gray-200 mb-2 mt-4 first:mt-0">{children}</h4>,
+            h5: ({ children }) => <h5 className="text-lg font-semibold text-gray-200 mb-2 mt-3 first:mt-0">{children}</h5>,
+            h6: ({ children }) => <h6 className="text-base font-medium text-gray-300 mb-2 mt-3 first:mt-0">{children}</h6>,
             // 段落
             p: ({ children }) => <p className="mb-2 last:mb-0 text-gray-300 leading-relaxed">{children}</p>,
             em: ({ children }) => <em className="italic text-gray-200">{children}</em>,
@@ -789,9 +789,10 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       )}
       <div
         ref={chartContainerRef}
-        className="w-full h-64 relative"
+        className="w-full relative"
         onMouseDown={handleMouseDown}
         style={{
+          aspectRatio: '1 / 0.618',
           cursor: isDragging ? 'grabbing' : 'grab',
           userSelect: 'none'
         }}

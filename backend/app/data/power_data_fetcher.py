@@ -6,6 +6,7 @@
 
 架构:
 - fetch_power_data(): 获取天气数据并生成供电需求
+- fetch_historical_same_period(): 获取近N年同期数据用于预测
 - generate_power_demand(): Mock供电需求生成算法
 - prepare(): 数据预处理为标准时序格式 (ds, y)
 """
@@ -13,7 +14,7 @@
 import pandas as pd
 import numpy as np
 import math
-from typing import Optional
+from typing import Optional, Tuple
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -424,3 +425,120 @@ class PowerDataFetcher:
 
         print(f"✅ 数据准备: {len(result)} 条, {result['ds'].min().date()} ~ {result['ds'].max().date()}")
         return result
+
+
+async def fetch_historical_same_period(
+    city_name: str,
+    target_start: datetime,
+    target_end: datetime,
+    years_back: int = 2
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    获取近N年同期数据并平均迁移到目标日期范围
+
+    用于基于历史同期数据的预测方法，替代纯机器学习预测。
+
+    Args:
+        city_name: 城市名称，如"北京"
+        target_start: 目标预测开始日期
+        target_end: 目标预测结束日期
+        years_back: 回溯年数（默认2年）
+
+    Returns:
+        (avg_power, avg_weather) 元组:
+        - avg_power: DataFrame，包含 ds（目标日期）和 y（平均供电量）
+        - avg_weather: DataFrame，包含历史同期平均天气数据
+    """
+    weather_client = get_weather_client()
+    base_load = CITY_BASE_LOADS.get(city_name, DEFAULT_BASE_LOAD)
+
+    all_power_data = []
+    all_weather_data = []
+
+    # 确保日期有时区信息
+    if target_start.tzinfo is None:
+        target_start = target_start.replace(tzinfo=BEIJING_TZ)
+    if target_end.tzinfo is None:
+        target_end = target_end.replace(tzinfo=BEIJING_TZ)
+
+    for year_offset in range(1, years_back + 1):
+        # 计算历史同期日期
+        hist_start = target_start - timedelta(days=365 * year_offset)
+        hist_end = target_end - timedelta(days=365 * year_offset)
+
+        try:
+            # 获取历史天气（使用 Archive API）
+            hist_weather = await weather_client.fetch_archive_weather(
+                city_name,
+                hist_start.strftime("%Y-%m-%d"),
+                hist_end.strftime("%Y-%m-%d")
+            )
+
+            if hist_weather.empty:
+                print(f"[历史同期] {year_offset}年前无天气数据，跳过")
+                continue
+
+            # 基于历史天气生成供电量
+            year_power = []
+            for _, row in hist_weather.iterrows():
+                # 确保日期是 datetime 类型
+                hist_date = pd.to_datetime(row["date"])
+                if hist_date.tzinfo is None:
+                    hist_date = hist_date.tz_localize(BEIJING_TZ)
+
+                demand = generate_power_demand(
+                    base_load=base_load,
+                    temperature=row["temperature"],
+                    date=hist_date,
+                    humidity=row.get("humidity")
+                )
+
+                # 计算相对于目标日期的偏移天数
+                days_from_start = (hist_date.date() - hist_start.date()).days
+                target_date = target_start + timedelta(days=days_from_start)
+
+                year_power.append({
+                    "ds": target_date,
+                    "y": demand,
+                    "year_offset": year_offset
+                })
+
+            all_power_data.extend(year_power)
+
+            # 记录天气数据（用于后续调整）
+            weather_copy = hist_weather.copy()
+            weather_copy["year_offset"] = year_offset
+            weather_copy["target_date"] = weather_copy["date"].apply(
+                lambda d: target_start + timedelta(days=(pd.to_datetime(d).date() - hist_start.date()).days)
+            )
+            all_weather_data.append(weather_copy)
+
+            print(f"[历史同期] 获取 {year_offset} 年前数据成功: {len(year_power)} 天")
+
+        except Exception as e:
+            print(f"[历史同期] 获取 {year_offset} 年前数据失败: {e}")
+            continue
+
+    if not all_power_data:
+        raise ValueError(f"无法获取 {city_name} 的任何历史同期数据")
+
+    # 按目标日期分组平均
+    power_df = pd.DataFrame(all_power_data)
+    avg_power = power_df.groupby("ds")["y"].mean().reset_index()
+    avg_power = avg_power.sort_values("ds").reset_index(drop=True)
+
+    # 合并天气数据并计算平均
+    if all_weather_data:
+        weather_df = pd.concat(all_weather_data, ignore_index=True)
+        avg_weather = weather_df.groupby("target_date").agg({
+            "temperature": "mean",
+            "humidity": "mean"
+        }).reset_index()
+        avg_weather.columns = ["date", "temperature", "humidity"]
+        avg_weather = avg_weather.sort_values("date").reset_index(drop=True)
+    else:
+        avg_weather = pd.DataFrame(columns=["date", "temperature", "humidity"])
+
+    print(f"[历史同期] 平均后数据: {len(avg_power)} 天, 基于 {years_back} 年同期")
+
+    return avg_power, avg_weather

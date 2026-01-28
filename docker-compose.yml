@@ -57,6 +57,12 @@ services:
       - RAG_SERVICE_URL=${RAG_SERVICE_URL}
       - HF_ENDPOINT=https://hf-mirror.com
       - HF_TOKEN=${HF_TOKEN}
+      # MongoDB 配置
+      - MONGODB_HOST=${MONGODB_HOST}
+      - MONGODB_PORT=${MONGODB_PORT:-27017}
+      - MONGODB_USERNAME=${MONGODB_USERNAME}
+      - MONGODB_PASSWORD=${MONGODB_PASSWORD}
+      - MONGODB_DATABASE=${MONGODB_DATABASE}
     volumes:
       - ${HOME}/.cache/huggingface:/root/.cache/huggingface
     depends_on:

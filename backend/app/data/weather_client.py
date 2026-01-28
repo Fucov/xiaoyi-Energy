@@ -323,6 +323,84 @@ class WeatherClient:
             traceback.print_exc()
             raise ValueError(error_msg)
 
+    async def fetch_archive_weather(
+        self,
+        city_name: str,
+        start_date: str,
+        end_date: str
+    ) -> pd.DataFrame:
+        """
+        获取历史存档天气数据（支持任意历史日期，可追溯多年）
+
+        使用 Open-Meteo Archive API
+        端点: https://archive-api.open-meteo.com/v1/archive
+
+        Args:
+            city_name: 城市名称
+            start_date: 开始日期 (YYYY-MM-DD)
+            end_date: 结束日期 (YYYY-MM-DD)
+
+        Returns:
+            DataFrame，包含 date, temperature, humidity 字段（日均值）
+        """
+        lat, lon = self._get_city_coordinates(city_name)
+
+        url = "https://archive-api.open-meteo.com/v1/archive"
+        params = {
+            "latitude": lat,
+            "longitude": lon,
+            "start_date": start_date,
+            "end_date": end_date,
+            "hourly": "temperature_2m,relative_humidity_2m",
+            "timezone": "Asia/Shanghai"
+        }
+
+        try:
+            response = await self.client.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+
+            hourly = data.get("hourly", {})
+            times = hourly.get("time", [])
+            temperatures = hourly.get("temperature_2m", [])
+            humidities = hourly.get("relative_humidity_2m", [])
+
+            if not times:
+                raise ValueError(f"Archive API 未返回数据: {start_date} ~ {end_date}")
+
+            df = pd.DataFrame({
+                "datetime": pd.to_datetime(times),
+                "temperature": temperatures,
+                "humidity": humidities
+            })
+
+            # 过滤无效数据
+            df = df.dropna(subset=["temperature", "datetime"])
+
+            if len(df) == 0:
+                raise ValueError(f"Archive API 返回的数据中没有有效的温度数据")
+
+            # 聚合为日均值
+            df["date"] = df["datetime"].dt.date
+            daily = df.groupby("date").agg({
+                "temperature": "mean",
+                "humidity": "mean"
+            }).reset_index()
+            daily["date"] = pd.to_datetime(daily["date"])
+            daily = daily.sort_values("date").reset_index(drop=True)
+
+            print(f"[Weather Archive] 获取 {city_name} 历史天气: {len(daily)} 天 ({start_date} ~ {end_date})")
+            return daily
+
+        except httpx.HTTPStatusError as e:
+            error_msg = f"Archive API 请求失败: {e.response.status_code} - {e.response.text}"
+            print(f"[Weather Archive] Error: {error_msg}")
+            raise ValueError(error_msg)
+        except Exception as e:
+            error_msg = f"获取历史存档天气数据失败: {str(e)}"
+            print(f"[Weather Archive] Error: {error_msg}")
+            raise ValueError(error_msg)
+
 
 # 单例实例
 _weather_client: Optional[WeatherClient] = None

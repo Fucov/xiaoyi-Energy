@@ -40,23 +40,23 @@ export function Sidebar({
                     }`}
             >
                 {/* Top Section - Toggle & New Chat */}
-                <div className="h-14 border-b border-white/5 flex items-center justify-between px-3">
+                <div className="h-12 border-b border-white/5 flex items-center justify-between px-2">
                     <button
                         onClick={() => setCollapsed(!collapsed)}
-                        className="p-2 hover:bg-dark-600 rounded-lg transition-colors"
+                        className="p-1.5 hover:bg-dark-600 rounded-md transition-colors"
                         title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                     >
                         {collapsed ? (
-                            <PanelLeft className="w-5 h-5 text-gray-400" />
+                            <PanelLeft className="w-4 h-4 text-gray-400" />
                         ) : (
-                            <PanelLeftClose className="w-5 h-5 text-gray-400" />
+                            <PanelLeftClose className="w-4 h-4 text-gray-400" />
                         )}
                     </button>
 
                     {!collapsed && (
                         <button
                             onClick={onNewChat}
-                            className="flex items-center gap-2 px-3 py-2 bg-violet-600 hover:bg-violet-500 rounded-lg transition-colors text-sm font-medium"
+                            className="flex items-center gap-2 px-3 py-1.5 bg-violet-600 hover:bg-violet-500 rounded-md transition-colors text-sm font-medium"
                         >
                             <Plus className="w-4 h-4" />
                             New Chat
@@ -65,7 +65,7 @@ export function Sidebar({
                 </div>
 
                 {/* Middle Section - Session List */}
-                <div className="flex-1 overflow-y-auto py-2 px-2">
+                <div className="flex-1 overflow-y-auto py-1.5 px-1.5">
                     {!collapsed ? (
                         sessions.length > 0 ? (
                             sessions.map((session) => (
@@ -89,7 +89,7 @@ export function Sidebar({
                             <button
                                 key={session.session_id}
                                 onClick={() => onSelectSession(session.session_id)}
-                                className={`w-full h-10 rounded-lg mb-1 transition-colors ${session.session_id === activeSessionId
+                                className={`w-full h-8 rounded-md mb-1 transition-colors ${session.session_id === activeSessionId
                                     ? 'bg-violet-600/20 border border-violet-500/30'
                                     : 'hover:bg-dark-600'
                                     }`}
@@ -103,8 +103,8 @@ export function Sidebar({
 
                 {/* Bottom Section - Settings */}
                 {!collapsed && (
-                    <div className="border-t border-white/5 p-3">
-                        <button className="flex items-center gap-3 w-full px-3 py-2 hover:bg-dark-600 rounded-lg transition-colors text-sm text-gray-300">
+                    <div className="border-t border-white/5 p-2">
+                        <button className="flex items-center gap-2 w-full px-2 py-1.5 hover:bg-dark-600 rounded-md transition-colors text-sm text-gray-300">
                             <Settings className="w-4 h-4" />
                             Settings
                         </button>

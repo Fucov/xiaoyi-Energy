@@ -23,6 +23,27 @@ CN_FINANCE_DOMAINS = [
     "cs.com.cn",         # 中证网
 ]
 
+# 中国新闻/天气/能源网站域名白名单
+CN_NEWS_DOMAINS = [
+    "sina.com.cn",       # 新浪
+    "163.com",           # 网易
+    "qq.com",            # 腾讯
+    "sohu.com",          # 搜狐
+    "people.com.cn",     # 人民网
+    "xinhuanet.com",     # 新华网
+    "chinanews.com.cn",  # 中国新闻网
+    "bjnews.com.cn",     # 新京报
+    "thepaper.cn",       # 澎湃新闻
+    "cctv.com",          # 央视网
+    "weather.com.cn",    # 中国天气网
+    "nea.gov.cn",        # 国家能源局
+    "sgcc.com.cn",       # 国家电网
+    "csg.cn",            # 南方电网
+    "in-en.com",         # 国际能源网
+    "ne21.com",          # 北极星电力网
+    "bjx.com.cn",        # 北极星电力网
+]
+
 
 class TavilyNewsClient:
     """Tavily 新闻搜索客户端"""
@@ -132,7 +153,7 @@ class TavilyNewsClient:
         # 构建搜索查询：搜索天气相关关键词（寒潮、高温、电力等）
         query = f"{region_name} 天气 寒潮 高温 电力 供电"
         
-        # 使用通用搜索，不限制域名（天气新闻可能来自多个来源）
+        # 限制中国新闻域名，确保返回中文结果
         return self.search(
             query=query,
             start_date=start_date,
@@ -140,5 +161,5 @@ class TavilyNewsClient:
             days=days if not start_date and not end_date else None,
             max_results=max_results,
             search_depth="advanced",
-            include_domains=None,  # 不限制域名，获取更广泛的天气新闻
+            include_domains=CN_NEWS_DOMAINS,  # 限制中国新闻/能源网站
         )

@@ -217,8 +217,8 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
     )}>
       {/* AI 头像 */}
       {!isUser && (
-        <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-lg">
-          <span className="text-base">🔮</span>
+        <div className="w-7 h-7 rounded-lg bg-gradient-to-br from-violet-500 to-purple-600 flex items-center justify-center flex-shrink-0 shadow-lg">
+          <span className="text-xs">🔮</span>
         </div>
       )}
 
@@ -229,12 +229,12 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
         {/* 消息内容 */}
         {isUser ? (
           // 用户消息：纯文本
-          <div className="px-4 py-3 rounded-2xl text-[15px] leading-relaxed bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-br-md">
+          <div className="px-3 py-2 rounded-xl text-sm leading-relaxed bg-gradient-to-r from-violet-600 to-purple-600 text-white rounded-br-md">
             {displayText}
           </div>
         ) : (
           // AI消息：支持多种内容类型
-          <div className="space-y-4 min-w-[200px]">
+          <div className="space-y-3 min-w-[200px]">
             {/* 意图识别结果（可折叠） */}
             {message.intentInfo && (
               <IntentBadge intentInfo={message.intentInfo} />
@@ -251,7 +251,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
             {/* 步骤进度 - 只在 forecast 模式下显示 */}
             {message.renderMode === 'forecast' && message.steps && message.steps.length > 0 && (
-              <div className="glass rounded-2xl px-6 py-4">
+              <div className="glass rounded-xl px-4 py-3">
                 <StepProgress steps={message.steps} />
               </div>
             )}
@@ -307,7 +307,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                 // 如果是简单问答，直接显示文本内容，不使用结构化布局
                 if (isSimpleAnswer) {
                   return (
-                    <div className="glass rounded-2xl px-4 py-3 text-gray-200">
+                    <div className="glass rounded-xl px-3 py-2 text-gray-200">
                       {texts.map((content, index) => (
                         <MessageContent key={index} content={content} />
                       ))}
@@ -321,15 +321,15 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                 if (message.isConversationalMode && texts.length > 0) {
                   return (
                     <div className="max-w-3xl animate-fade-in">
-                      <div className="glass rounded-2xl p-6">
+                      <div className="glass rounded-xl p-4">
                         <div className="flex items-start gap-4">
-                          <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg">
-                            <span className="text-2xl">🤖</span>
+                          <div className="w-9 h-9 bg-gradient-to-br from-blue-500 to-blue-600 rounded-full flex items-center justify-center flex-shrink-0 shadow-lg">
+                            <span className="text-base">🤖</span>
                           </div>
                           <div className="flex-1">
-                            <h3 className="text-lg font-bold text-gray-100 mb-3 flex items-center gap-2">
+                            <h3 className="text-base font-semibold text-gray-100 mb-2 flex items-center gap-2">
                               小易助手
-                              <span className="text-xs bg-blue-500/20 text-blue-300 px-2 py-1 rounded-full font-medium border border-blue-500/30">
+                              <span className="text-xs bg-blue-500/20 text-blue-300 px-1.5 py-0.5 rounded-full font-medium border border-blue-500/30">
                                 智能助理
                               </span>
                             </h3>
@@ -343,11 +343,11 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                       </div>
 
                       {/* Tips */}
-                      <div className="mt-4 bg-blue-500/10 rounded-xl p-4 border border-blue-500/20">
-                        <h4 className="font-semibold text-blue-300 mb-2 flex items-center gap-2">
+                      <div className="mt-3 bg-blue-500/10 rounded-lg p-3 border border-blue-500/20">
+                        <h4 className="font-semibold text-blue-300 mb-1.5 flex items-center gap-1.5">
                           💡 使用建议
                         </h4>
-                        <ul className="text-sm text-blue-200/80 space-y-1">
+                        <ul className="text-xs text-blue-200/80 space-y-0.5">
                           <li>• 请输入正确的区域名称，如"北京"、"上海"</li>
                           <li>• 可以指定预测天数，如"预测北京未来30天供电需求"</li>
                           <li>• 支持的区域示例：北京、上海、广州、深圳等</li>
@@ -451,21 +451,21 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     message.isCollapsing && "animate-collapse"
                   )}>
                     {/* 上半部分：左右分栏 - 多因素相关性分析(1) | 相关新闻+研报(2) */}
-                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-3">
                       {/* 左侧：多因素相关性分析 */}
-                      <div className="glass rounded-2xl p-4">
+                      <div className="glass rounded-xl p-3">
                         {influenceData ? (
                           <MultiFactorInfluencePanel influenceData={influenceData} />
                         ) : legacyInfluenceData ? (
                           <div>
-                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                            <h3 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
                               <span>📊</span> 多因素相关性分析
                             </h3>
                             <MultiFactorInfluenceAxis influenceData={legacyInfluenceData} />
                           </div>
                         ) : emotionData ? (
                           <div className="space-y-3">
-                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                            <h3 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-1.5">
                               <span>📊</span> 相关性分析
                             </h3>
                             <EmotionGauge emotion={emotionData.score} description="" />
@@ -484,17 +484,17 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                       </div>
 
                       {/* 右侧：相关新闻 + 研报来源（1:1 高度比例） */}
-                      <div className="grid grid-rows-2 gap-4 min-h-[400px]">
+                      <div className="grid grid-rows-2 gap-3 min-h-[340px]">
                         {/* 相关新闻（占 1 份高度） */}
-                        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                        <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-3 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
                           <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-purple-500/5" />
                           <div className="relative flex-shrink-0 mb-4">
                             <div className="flex items-center justify-between">
                               <div className="flex items-center gap-2">
-                                <div className="p-1.5 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30">
-                                  <span className="text-base">📰</span>
+                                <div className="p-1 rounded-md bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30">
+                                  <span className="text-sm">📰</span>
                                 </div>
-                                <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
+                                <h3 className="text-sm font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
                                   相关新闻
                                 </h3>
                               </div>
@@ -508,7 +508,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                             ) : (
                               <div className="flex flex-col items-center justify-center h-full text-gray-400">
                                 <div className="relative mb-3">
-                                  <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+                                  <div className="w-8 h-8 border-2 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
                                 </div>
                                 <span className="text-sm">正在获取新闻...</span>
                               </div>
@@ -518,15 +518,15 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
                         {/* 研报来源（占 2 份高度） */}
                         {message.ragSources && message.ragSources.length > 0 ? (
-                          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                          <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-3 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
                             <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
                             <div className="relative flex-shrink-0 mb-4">
                               <div className="flex items-center justify-between">
                                 <div className="flex items-center gap-2">
-                                  <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
-                                    <span className="text-base">📚</span>
+                                  <div className="p-1 rounded-md bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
+                                    <span className="text-sm">📚</span>
                                   </div>
-                                  <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
+                                  <h3 className="text-sm font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
                                     研报来源
                                   </h3>
                                   <span className="text-xs text-gray-500 px-2 py-0.5 bg-dark-700/50 rounded border border-white/5 font-normal">
@@ -542,21 +542,21 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                             </div>
                           </div>
                         ) : (
-                          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                          <div className="relative overflow-hidden rounded-lg bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-3 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
                             <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
                             <div className="relative flex-shrink-0 mb-4">
                               <div className="flex items-center gap-2">
-                                <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
-                                  <span className="text-base">📚</span>
+                                <div className="p-1 rounded-md bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
+                                  <span className="text-sm">📚</span>
                                 </div>
-                                <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
+                                <h3 className="text-sm font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
                                   研报来源
                                 </h3>
                               </div>
                             </div>
                             <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
                               <div className="relative mb-3">
-                                <div className="w-10 h-10 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
+                                <div className="w-8 h-8 border-2 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
                               </div>
                               <span className="text-sm">正在检索研报...</span>
                             </div>
@@ -566,8 +566,8 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     </div>
 
                     {/* 供电量预测趋势图（全宽） */}
-                    <div className="glass rounded-2xl p-4">
-                      <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                    <div className="glass rounded-xl p-3">
+                      <h3 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
                         <span>📈</span> 供电量走势分析
                       </h3>
                       {priceChart ? (
@@ -581,8 +581,8 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     </div>
 
                     {/* 综合分析报告（全宽，最后） */}
-                    <div className="glass rounded-2xl p-4">
-                      <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                    <div className="glass rounded-xl p-3">
+                      <h3 className="text-sm font-semibold text-gray-300 mb-2 flex items-center gap-2">
                         <span>📝</span> 综合分析报告
                       </h3>
                       {reportText ? (
@@ -626,10 +626,10 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
         {/* 消息底部操作 */}
         <div className={cn(
-          "flex items-center gap-2 mt-1.5 px-1",
+          "flex items-center gap-2 mt-1 px-1",
           isUser ? "justify-end" : "justify-start"
         )}>
-          <span className="text-[10px] text-gray-600">{message.timestamp}</span>
+          <span className="text-xs text-gray-600">{message.timestamp}</span>
 
           {/* AI 消息的操作按钮 - 只在消息完成后显示 */}
           {!isUser && (() => {
@@ -699,7 +699,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
       {/* 用户头像 */}
       {isUser && (
-        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-sm font-bold">
+        <div className="w-7 h-7 rounded-full bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-xs font-bold">
           李
         </div>
       )}

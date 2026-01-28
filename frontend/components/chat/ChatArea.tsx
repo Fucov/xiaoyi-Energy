@@ -345,8 +345,8 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
             ? {
                 ...msg,
                 steps,
-                // 🔧 修复：收到 step_start 事件说明是预测流程，确保 renderMode 是 forecast
-                renderMode: 'forecast' as RenderMode
+                // 🔧 不在这里设置 renderMode，等 onIntent 确定是预测后再设置
+                // 这样普通对话就不会显示进度条
               }
             : msg
         ))
@@ -417,17 +417,20 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           // 多因素相关性数据
           console.log('[ChatArea] ===== 收到影响因子数据 =====')
           console.log('[ChatArea] Raw data:', data)
-          
+
+          // 类型断言为 Record 以便安全访问属性
+          const influenceRaw = data as Record<string, unknown>
+
           // 检查是否是新格式（包含factors字段）
-          if (data.factors && data.correlation_matrix) {
+          if (influenceRaw.factors && influenceRaw.correlation_matrix) {
             // 新格式：完整的InfluenceAnalysisResult
-            accumulatedInfluence = data
+            accumulatedInfluence = influenceRaw
             console.log('[ChatArea] Parsed new format influence data')
-            
-            const overallScore = data.overall_score || 0
-            accumulatedEmotion = { 
-              score: overallScore, 
-              description: data.summary || '相关性分析' 
+
+            const overallScore = (influenceRaw.overall_score as number) || 0
+            accumulatedEmotion = {
+              score: overallScore,
+              description: (influenceRaw.summary as string) || '相关性分析'
             }
           } else {
             // 旧格式：兼容处理
@@ -1225,7 +1228,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
   return (
     <main className="flex-1 flex flex-col min-w-0">
       {/* 顶部栏 */}
-      <header className="h-14 border-b border-white/5 flex items-center justify-between px-6 bg-dark-800/30">
+      <header className="h-14 border-b border-white/5 flex items-center justify-between px-4 bg-dark-800/30">
         <div className="flex items-center gap-4">
           <Image
             src="/logo.svg"
@@ -1234,7 +1237,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
             height={28}
             className="flex-shrink-0"
           />
-          <h2 className="text-base font-semibold">
+          <h2 className="text-xl font-semibold">
             小易猜猜
           </h2>
           {!isEmpty && isLoading && (
@@ -1247,13 +1250,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         </div>
         {!isEmpty && (
           <div className="flex items-center gap-2">
-            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="导出报告">
+            <button className="p-1.5 hover:bg-dark-600 rounded-lg transition-colors" title="导出报告">
               <Download className="w-4 h-4 text-gray-400" />
             </button>
-            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="分享">
+            <button className="p-1.5 hover:bg-dark-600 rounded-lg transition-colors" title="分享">
               <Share2 className="w-4 h-4 text-gray-400" />
             </button>
-            <button className="p-2 hover:bg-dark-600 rounded-lg transition-colors" title="更多">
+            <button className="p-1.5 hover:bg-dark-600 rounded-lg transition-colors" title="更多">
               <MoreVertical className="w-4 h-4 text-gray-400" />
             </button>
           </div>
@@ -1261,7 +1264,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       </header>
 
       {/* 对话区域 */}
-      <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-6">
+      <div ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 space-y-4">
         {isLoadingHistory ? (
           /* 加载历史记录中 */
           <div className="flex flex-col items-center justify-center h-full -mt-20">
@@ -1276,13 +1279,13 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           /* 空状态 - 欢迎界面 */
           <div className="flex flex-col items-center justify-center h-full -mt-20">
             <div className="text-center max-w-md">
-              <h3 className="text-2xl font-semibold text-gray-200 mb-3">
+              <h3 className="text-lg font-semibold text-gray-200 mb-2">
                 有什么可以帮忙的？
               </h3>
-              <p className="text-gray-400 text-sm mb-8">
+              <p className="text-gray-400 text-sm mb-6">
                 我可以帮你分析供电趋势、预测用电需求、生成供电分析报告等
               </p>
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-2">
                 {quickSuggestions.map((suggestion, index) => (
                   <button
                     key={index}
@@ -1290,7 +1293,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
                       // 直接发送快速追问
                       handleSend(suggestion)
                     }}
-                    className="px-4 py-3 bg-dark-600/50 hover:bg-dark-500/50 border border-white/5 hover:border-violet-500/30 rounded-xl text-left text-sm text-gray-300 hover:text-gray-100 transition-all"
+                    className="px-3 py-2 bg-dark-600/50 hover:bg-dark-500/50 border border-white/5 hover:border-violet-500/30 rounded-lg text-left text-sm text-gray-300 hover:text-gray-100 transition-all"
                   >
                     {suggestion}
                   </button>
@@ -1340,15 +1343,15 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       )}
 
       {/* 输入区域 */}
-      <div className="px-3 py-2 border-t border-white/5 bg-dark-800/50">
+      <div className="px-2 py-1.5 border-t border-white/5 bg-dark-800/50">
         <div className="max-w-4xl mx-auto">
           {/* 输入框行 */}
           <div className="flex items-center gap-2">
             {/* 输入框 */}
             <div className="flex-1 relative">
-              <div className="glass rounded-xl border border-white/10 focus-within:border-violet-500/50 transition-colors">
+              <div className="glass rounded-lg border border-white/10 focus-within:border-violet-500/50 transition-colors">
                 <textarea
-                  className="w-full bg-transparent px-4 py-2.5 text-sm text-gray-200 placeholder-gray-500 resize-none outline-none"
+                  className="w-full bg-transparent px-3 py-2 text-sm text-gray-200 placeholder-gray-500 resize-none outline-none"
                   rows={1}
                   placeholder="问我任何关于电力需求预测的问题..."
                   value={inputValue}
@@ -1360,7 +1363,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
 
             {/* 发送按钮 */}
             <button
-              className="p-2.5 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg transition-all flex-shrink-0 disabled:opacity-50"
+              className="p-2 bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-500 hover:to-purple-500 rounded-lg transition-all flex-shrink-0 disabled:opacity-50"
               onClick={() => handleSend()}
               disabled={!inputValue.trim() || isLoading}
             >
@@ -1369,7 +1372,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           </div>
 
           {/* 底部提示 */}
-          <div className="flex items-center justify-between mt-1.5 px-1">
+          <div className="flex items-center justify-between mt-1 px-1">
             <div className="flex items-center gap-2 text-[10px] text-gray-600">
               <kbd className="px-1 py-0.5 bg-dark-600/50 rounded text-gray-500 text-[9px]">⌘↵</kbd>
               <span>发送</span>

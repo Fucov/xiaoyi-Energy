@@ -87,7 +87,8 @@ async def fetch_rag_reports(rag_searcher: RAGSearcher, keywords: List[str]) -> L
                 filename=doc["file_name"],
                 page=doc["page_number"],
                 content_snippet=doc.get("content", "")[:200],
-                score=doc["score"]
+                score=doc["score"],
+                doc_id=doc.get("doc_id", "")
             )
             for doc in docs
         ]

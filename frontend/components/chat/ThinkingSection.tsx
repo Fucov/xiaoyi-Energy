@@ -36,7 +36,7 @@ export function ThinkingSection({ content, isLoading = false, logs = [] }: Think
           ) : (
             <Brain className="w-4 h-4 text-violet-400" />
           )}
-          <span className="text-sm font-medium text-gray-300">
+          <span className="text-base font-medium text-gray-300">
             {isLoading ? '思考中...' : '思考过程'}
           </span>
           {isLoading && (

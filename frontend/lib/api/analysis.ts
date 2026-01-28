@@ -45,6 +45,7 @@ export interface RAGSource {
   page: number           // 页码
   content_snippet: string // 摘要片段
   score: number          // 相关度分数 (0-1)
+  doc_id?: string        // 文档 ID，用于获取 PDF（可选）
 }
 
 export interface ReportItem {

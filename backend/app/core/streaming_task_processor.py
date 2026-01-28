@@ -747,31 +747,17 @@ class StreamingTaskProcessor:
             self.sentiment_agent, influence_result or {}, features
         )
 
-        # 计算预测天数
-        last_date = df["ds"].max().to_pydatetime()
-        # 确保last_date有时区信息
-        BEIJING_TZ = ZoneInfo("Asia/Shanghai")
-        if last_date.tzinfo is None:
-            last_date = last_date.replace(tzinfo=BEIJING_TZ)
+        # 使用意图中的预测天数（默认30天）
+        forecast_horizon = max(intent.forecast_horizon, 1)
 
-        target_date_from_start = last_date + timedelta(days=90)
-        # print(f"[ModelSelection] 目标日期从开始: {target_date_from_start}")
-        # 确保target_date_to_today也是timezone-aware的
-        target_date_to_today = datetime.now(BEIJING_TZ)
-        # print(f"[ModelSelection] 目标日期到今天: {target_date_to_today}")
-        target_date = max(target_date_from_start, target_date_to_today)
-        # print(f"[ModelSelection] 目标日期: {target_date}")
-        forecast_horizon = max((target_date - last_date).days, 1)
-        # print(f"[ModelSelection] 预测天数: {forecast_horizon}")
-
-        # 模型选择：Demo模式 - 为了轻量化展示，默认使用Prophet模型
-        # 跳过复杂的模型选择过程，直接使用Prophet
+        # 模型选择：默认使用基于历史同期数据的预测方法
+        # 该方法基于近2年同期数据平均，并根据天气差异调整
         user_specified_model = intent.forecast_model
 
-        # Demo模式：默认使用Prophet，跳过复杂的模型选择过程
+        # 默认使用历史同期预测方法
         if not user_specified_model or user_specified_model == "auto":
-            final_model = "prophet"
-            model_selection_reason = "Demo模式：使用Prophet模型进行预测（轻量化展示）"
+            final_model = "historical_average"
+            model_selection_reason = "基于近2年历史同期数据平均预测，并根据天气差异调整"
         else:
             # 用户指定了模型，使用用户指定的模型
             final_model = user_specified_model
@@ -809,7 +795,7 @@ class StreamingTaskProcessor:
 
         # 只对最终选定的模型调用一次 run_forecast
         forecast_result = await run_forecast(
-            df, final_model, max(forecast_horizon, 1), prophet_params, weather_df
+            df, final_model, max(forecast_horizon, 1), prophet_params, weather_df, region_name
         )
 
         # 保存并发送预测结果（forecast_result 是 ForecastResult 对象）
