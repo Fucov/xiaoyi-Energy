@@ -13,6 +13,7 @@ from .error_explainer import ErrorExplainerAgent
 from .sentiment_agent import SentimentAgent
 from .news_summary_agent import NewsSummaryAgent
 from .prediction_analysis_agent import PredictionAnalysisAgent
+from .influence_summary_agent import InfluenceSummaryAgent
 
 __all__ = [
     "BaseAgent",
@@ -23,4 +24,5 @@ __all__ = [
     "SentimentAgent",
     "NewsSummaryAgent",
     "PredictionAnalysisAgent",
+    "InfluenceSummaryAgent",
 ]

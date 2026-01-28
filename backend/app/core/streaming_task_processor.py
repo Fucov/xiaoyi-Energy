@@ -1317,6 +1317,9 @@ class StreamingTaskProcessor:
         
         influence_result["overall_score"] = round(float(overall_score), 4)
         
+        # 保存影响因子数据到 Redis
+        message.save_influence_analysis(influence_result)
+        
         # 发送影响因子数据
         print(f"[Influence] 发送影响因子数据: {len(influence_result.get('ranking', []))} 个因子")
         await self._emit_event(
@@ -1328,7 +1331,7 @@ class StreamingTaskProcessor:
                 "data": influence_result,
             },
         )
-        print(f"[Influence] 影响因子数据已发送")
+        print(f"[Influence] 影响因子数据已发送并保存到Redis")
 
         return influence_result
 

@@ -208,6 +208,14 @@ class Message:
             data.emotion = score
             data.emotion_des = description
             self._save(data)
+    
+    def save_influence_analysis(self, influence_result: Dict):
+        """保存多因素影响力分析结果"""
+        data = self.get()
+        if data:
+            data.influence_analysis = influence_result
+            self._save(data)
+            print(f"[Message] Saved influence analysis: {len(influence_result.get('ranking', []))} factors")
 
     def save_anomaly_zones(self, zones: List[Dict], ticker: str):
         """保存异常区域数据"""
