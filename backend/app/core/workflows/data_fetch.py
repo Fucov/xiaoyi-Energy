@@ -82,15 +82,22 @@ async def fetch_rag_reports(rag_searcher: RAGSearcher, keywords: List[str]) -> L
             5
         )
 
+        # 过滤低相关度结果（< 0.3）
+        MIN_SCORE = 0.3
+        filtered = [doc for doc in docs if doc["score"] >= MIN_SCORE]
+        if not filtered:
+            print(f"[RAG] All {len(docs)} results below score threshold {MIN_SCORE}, skipping")
+            return []
+
         return [
             RAGSource(
                 filename=doc["file_name"],
                 page=doc["page_number"],
-                content_snippet=doc.get("content", "")[:200],
+                content_snippet=doc.get("content", "")[:800],
                 score=doc["score"],
                 doc_id=doc.get("doc_id", "")
             )
-            for doc in docs
+            for doc in filtered
         ]
     except Exception as e:
         print(f"[RAG] 研报检索失败: {e}")

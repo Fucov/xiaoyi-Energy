@@ -553,6 +553,7 @@ class StreamingTaskProcessor:
         print(f"[RAG] rag_sources count: {len(rag_sources)}")
         if rag_sources:
             print(f"[RAG] First source: {rag_sources[0].filename} (score={rag_sources[0].score:.3f})")
+            rag_sources = await self._summarize_rag_sources(rag_sources, user_input)
             message.save_rag_sources(rag_sources)
             await self._emit_event(
                 event_queue,
@@ -901,10 +902,6 @@ class StreamingTaskProcessor:
         )
         message.update_step_detail(5, "running", f"训练模型...")
 
-        prophet_params = await recommend_forecast_params(
-            self.sentiment_agent, influence_result or {}, features
-        )
-
         # 使用意图中的预测天数（默认30天）
         forecast_horizon = max(intent.forecast_horizon, 1)
 
@@ -953,9 +950,12 @@ class StreamingTaskProcessor:
         display_model_name = _MODEL_DISPLAY_NAMES.get(final_model, final_model.upper())
         message.update_step_detail(5, "running", f"训练 {display_model_name}...")
 
-        prophet_params = await recommend_forecast_params(
-            self.sentiment_agent, influence_result or {}, features
-        )
+        # 只有 Prophet 模型需要 LLM 推荐参数，其他模型跳过
+        prophet_params = {}
+        if final_model == "prophet":
+            prophet_params = await recommend_forecast_params(
+                self.sentiment_agent, influence_result or {}, features
+            )
 
         # 只对最终选定的模型调用一次 run_forecast
         forecast_result = await run_forecast(
@@ -1315,6 +1315,7 @@ class StreamingTaskProcessor:
         message.save_conclusion(answer)
 
         if "rag" in results:
+            results["rag"] = await self._summarize_rag_sources(results["rag"], user_input)
             message.save_rag_sources(results["rag"])
             await self._emit_event(
                 event_queue,
@@ -1653,6 +1654,71 @@ class StreamingTaskProcessor:
         return full_content
 
     # ========== 辅助方法 ==========
+
+    async def _summarize_rag_sources(
+        self, rag_sources: list, user_query: str
+    ) -> list:
+        """用 LLM 批量总结 RAG 研报片段，将原始文本替换为精炼摘要"""
+        if not rag_sources:
+            return rag_sources
+
+        snippets_text = ""
+        for i, src in enumerate(rag_sources):
+            snippets_text += f"[{i+1}] 文件: {src.filename} | 第{src.page}页\n{src.content_snippet}\n\n"
+
+        prompt = f"""用户问题: {user_query}
+
+以下是从研报中检索到的原始文本片段，请为每个片段生成一段精炼的中文摘要（50-100字），提取核心观点和关键数据。
+
+{snippets_text}
+
+请严格按以下格式输出，每行一个摘要，以序号开头：
+1. 摘要内容
+2. 摘要内容
+..."""
+
+        try:
+            from openai import OpenAI
+            from app.core.config import settings
+
+            client = OpenAI(
+                api_key=settings.DEEPSEEK_API_KEY,
+                base_url="https://api.deepseek.com",
+            )
+            response = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是研报摘要助手，负责将研报原始文本提炼为简洁准确的摘要。只输出摘要，不要多余解释。",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=1000,
+                )
+            )
+
+            result = response.choices[0].message.content.strip()
+            lines = [
+                line.strip()
+                for line in result.split("\n")
+                if line.strip() and line.strip()[0].isdigit()
+            ]
+
+            for i, line in enumerate(lines):
+                if i < len(rag_sources):
+                    # 去掉序号前缀 "1. " "2. " 等
+                    summary = line.lstrip("0123456789.、).） ").strip()
+                    if summary:
+                        rag_sources[i].content_snippet = summary
+
+            print(f"[RAG] Summarized {len(lines)} snippets with LLM")
+        except Exception as e:
+            print(f"[RAG] LLM summarization failed, keeping raw snippets: {e}")
+
+        return rag_sources
 
     def _find_last_region(self, session: Session) -> Optional[str]:
         """从历史消息中查找上次使用的城市名称"""
