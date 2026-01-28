@@ -256,14 +256,7 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     let accumulatedTimeSeriesFull: TimeSeriesPoint[] = []
     let accumulatedNews: NewsItem[] = []
     let accumulatedEmotion: { score: number; description: string } | null = null
-    let accumulatedInfluence: {
-      temperature_influence?: number
-      humidity_influence?: number
-      seasonality_influence?: number
-      trend_influence?: number
-      volatility_influence?: number
-      description?: string
-    } | null = null
+    let accumulatedInfluence: any = null  // 支持新旧两种格式
     let accumulatedAnomalyZones: any[] = []  // 异常区域
     let stockTicker = ''  // 区域代码（保留变量名以兼容）
     let predictionStartDay = ''
@@ -408,21 +401,38 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           // 多因素影响力数据
           console.log('[ChatArea] ===== 收到影响因子数据 =====')
           console.log('[ChatArea] Raw data:', data)
-          const influenceData = data as {
-            temperature_influence?: number
-            humidity_influence?: number
-            seasonality_influence?: number
-            trend_influence?: number
-            volatility_influence?: number
-            description?: string
+          
+          // 检查是否是新格式（包含factors字段）
+          if (data.factors && data.correlation_matrix) {
+            // 新格式：完整的InfluenceAnalysisResult
+            accumulatedInfluence = data
+            console.log('[ChatArea] Parsed new format influence data')
+            
+            const overallScore = data.overall_score || 0
+            accumulatedEmotion = { 
+              score: overallScore, 
+              description: data.summary || '影响因素分析' 
+            }
+          } else {
+            // 旧格式：兼容处理
+            const influenceData = data as {
+              temperature_influence?: number
+              humidity_influence?: number
+              seasonality_influence?: number
+              trend_influence?: number
+              volatility_influence?: number
+              description?: string
+            }
+            accumulatedInfluence = influenceData
+            console.log('[ChatArea] Parsed legacy format influence data:', accumulatedInfluence)
+            
+            // 兼容：同时设置emotion（使用overall_score或平均值）
+            const overallScore = influenceData.temperature_influence && influenceData.humidity_influence && influenceData.seasonality_influence && influenceData.trend_influence && influenceData.volatility_influence
+              ? (influenceData.temperature_influence + influenceData.humidity_influence + influenceData.seasonality_influence + influenceData.trend_influence + influenceData.volatility_influence) / 5
+              : 0
+            accumulatedEmotion = { score: overallScore, description: influenceData.description || '影响因素分析' }
           }
-          accumulatedInfluence = influenceData
-          console.log('[ChatArea] Parsed influence data:', accumulatedInfluence)
-          // 兼容：同时设置emotion（使用overall_score或平均值）
-          const overallScore = influenceData.temperature_influence && influenceData.humidity_influence && influenceData.seasonality_influence && influenceData.trend_influence && influenceData.volatility_influence
-            ? (influenceData.temperature_influence + influenceData.humidity_influence + influenceData.seasonality_influence + influenceData.trend_influence + influenceData.volatility_influence) / 5
-            : 0
-          accumulatedEmotion = { score: overallScore, description: influenceData.description || '影响因素分析' }
+          
           console.log('[ChatArea] Calling updateContentsFromStreamData with influence:', accumulatedInfluence)
           updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedInfluence)
           console.log('[ChatArea] ===== 影响因子数据已处理 =====')
@@ -1067,10 +1077,21 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
       if (influence) {
         // 使用影响因子数据
         console.log('[ChatArea] updateContentsFromStreamData: Adding influence marker with data:', influence)
-        newContents.push({
-          type: 'text',
-          text: `__INFLUENCE_MARKER__${JSON.stringify(influence)}__`
-        })
+        try {
+          // 清理NaN值以便JSON序列化
+          const cleanedInfluence = JSON.parse(JSON.stringify(influence, (key, value) => {
+            if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) {
+              return null
+            }
+            return value
+          }))
+          newContents.push({
+            type: 'text',
+            text: `__INFLUENCE_MARKER__${JSON.stringify(cleanedInfluence)}__`
+          })
+        } catch (e) {
+          console.error('[ChatArea] Failed to stringify influence data:', e, influence)
+        }
       } else if (emotion) {
         // 兼容旧的情绪数据格式
         newContents.push({

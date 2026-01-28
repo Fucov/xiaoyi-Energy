@@ -11,7 +11,7 @@ Session 数据模型
 """
 
 from pydantic import BaseModel, Field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Any
 from enum import Enum
 
 
@@ -115,6 +115,25 @@ class ThinkingLogEntry(BaseModel):
     step_name: str                  # 步骤名称，如 "意图识别", "情感分析", "报告生成"
     content: str                    # LLM 原始输出内容
     timestamp: str                  # ISO 格式时间戳
+
+
+class FactorInfluence(BaseModel):
+    """单个因子的影响力分析结果"""
+    factor_name: str                # 因子名称，如 "temperature", "humidity"
+    factor_name_cn: Optional[str] = None  # 中文名称
+    correlation: float              # 相关系数 (-1 到 1)
+    influence_score: float         # 影响力得分 (0 到 1)
+    data: List[Dict[str, Any]] = Field(default_factory=list)  # 时序数据点
+
+
+class InfluenceAnalysisResult(BaseModel):
+    """多因素影响力分析结果"""
+    factors: Dict[str, FactorInfluence] = Field(default_factory=dict)  # 各因子分析结果
+    correlation_matrix: List[List[float]] = Field(default_factory=list)  # 相关性矩阵 (6x6)
+    ranking: List[Dict[str, Any]] = Field(default_factory=list)  # 影响力排行榜
+    time_range: Dict[str, str] = Field(default_factory=dict)  # 时间范围 {"start": "...", "end": "..."}
+    summary: str = ""               # 分析摘要
+    overall_score: Optional[float] = None  # 总体得分
 
 
 # ========== 意图识别相关 ==========
@@ -229,9 +248,12 @@ class MessageData(BaseModel):
     report_list: List[ReportItem] = Field(default_factory=list)
     rag_sources: List[RAGSource] = Field(default_factory=list)
 
-    # 情感分析
+    # 情感分析（保留以兼容）
     emotion: Optional[float] = None  # -1 到 1
     emotion_des: Optional[str] = None
+    
+    # 多因素影响力分析（新）
+    influence_analysis: Optional[Dict] = Field(default=None, description="多因素影响力分析结果")
 
     # 异常区域（用于图表标注）
     anomaly_zones: List[Dict] = Field(default_factory=list)  # 存储 [{startDate, endDate, summary, sentiment}, ...]

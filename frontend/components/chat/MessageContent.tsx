@@ -26,9 +26,12 @@ function preprocessMarkdown(text: string): string {
   // 全角归一化
   processed = processed.replace(/＋/g, '+').replace(/－/g, '-')
 
-  // 🚀 直接把 **+3.70%** 变成 <strong>+3.70%</strong>
+  // 处理带正负号的数字加粗，包括复杂格式如 **-0.09元(-0.82%)**
+  // 匹配格式：**+/-数字(单位)(括号内容)**
+  // 例如：**-0.09元(-0.82%)** 或 **+0.52元(+4.73%)** 或 **+3.70%**
+  // 使用更通用的匹配：匹配 ** 之间以 + 或 - 开头的所有内容（直到下一个 **）
   processed = processed.replace(
-    /\*\*\s*([+-]\d+(?:\.\d+)?[%元]?)\s*\*\*/g,
+    /\*\*\s*([+-][^*]+?)\s*\*\*/g,
     '<strong>$1</strong>'
   )
 
@@ -86,28 +89,28 @@ export function MessageContent({ content }: MessageContentProps) {
             ),
             // 表格
             table: ({ children }) => (
-              <div className="overflow-x-auto my-3">
-                <table className="w-full border-collapse border border-white/10">
+              <div className="overflow-x-auto my-3 rounded-lg border border-white/10 bg-dark-800/30 shadow-sm">
+                <table className="w-full border-collapse">
                   {children}
                 </table>
               </div>
             ),
             thead: ({ children }) => (
-              <thead className="bg-dark-700/50">{children}</thead>
+              <thead className="bg-gradient-to-r from-dark-700/50 to-dark-800/50 border-b border-white/10">{children}</thead>
             ),
             tbody: ({ children }) => (
               <tbody>{children}</tbody>
             ),
             tr: ({ children }) => (
-              <tr className="border-b border-white/5 hover:bg-dark-600/30 transition-colors">{children}</tr>
+              <tr className="border-b border-white/5 hover:bg-gradient-to-r hover:from-dark-700/30 hover:to-dark-800/30 transition-all duration-150 group">{children}</tr>
             ),
             th: ({ children }) => (
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider border border-white/10">
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
                 {children}
               </th>
             ),
             td: ({ children }) => (
-              <td className="px-4 py-2 text-sm text-gray-300 border border-white/5">
+              <td className="px-4 py-3 text-sm text-gray-300 group-hover:text-gray-200 transition-colors">
                 {children}
               </td>
             ),
@@ -224,41 +227,45 @@ export function MessageContent({ content }: MessageContentProps) {
     }
 
     return (
-      <div className="mt-2 overflow-x-auto max-h-80 overflow-y-auto">
+      <div className="mt-2 overflow-x-auto rounded-lg border border-white/10 bg-dark-800/30">
         {title && (
-          <h4 className="text-sm font-medium text-gray-300 mb-3">{title}</h4>
+          <div className="px-4 pt-3 pb-2 border-b border-white/10">
+            <h4 className="text-sm font-semibold text-gray-200">{title}</h4>
+          </div>
         )}
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="border-b border-white/10">
-              {headers.map((header, index) => (
-                <th
-                  key={index}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
-                >
-                  {header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr
-                key={rowIndex}
-                className="border-b border-white/5 hover:bg-dark-600/30 transition-colors"
-              >
-                {row.map((cell, cellIndex) => (
-                  <td
-                    key={cellIndex}
-                    className="px-4 py-2 text-sm text-gray-300"
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gradient-to-r from-dark-700/50 to-dark-800/50 border-b border-white/10">
+                {headers.map((header, index) => (
+                  <th
+                    key={index}
+                    className="px-4 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider"
                   >
-                    {renderCell(cell, cellIndex)}
-                  </td>
+                    {header}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr
+                  key={rowIndex}
+                  className="border-b border-white/5 hover:bg-gradient-to-r hover:from-dark-700/30 hover:to-dark-800/30 transition-all duration-150 group"
+                >
+                  {row.map((cell, cellIndex) => (
+                    <td
+                      key={cellIndex}
+                      className="px-4 py-3 text-sm text-gray-300 group-hover:text-gray-200 transition-colors"
+                    >
+                      {renderCell(cell, cellIndex)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     )
   }

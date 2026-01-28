@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 from typing import Optional, List, Dict, Any, Callable, Awaitable
 import pandas as pd
+import numpy as np
 
 from app.core.session import Session, Message
 from app.core.redis_client import get_redis
@@ -31,6 +32,7 @@ from app.services.stock_matcher import get_stock_matcher  # 保留以兼容
 from app.services.region_matcher import get_region_matcher
 from app.services.rag_client import check_rag_availability
 from app.services.influence_analyzer import InfluenceAnalyzer
+from app.data.industry_structure_client import get_industry_structure_client
 
 # Agents
 from app.agents import (
@@ -750,14 +752,14 @@ class StreamingTaskProcessor:
         # 多因素影响力分析（替代情绪分析）
         print(f"[Influence] 准备分析影响因子，供电数据: {len(df) if df is not None else 0} 条，天气数据: {len(weather_df) if weather_df is not None else 0} 条")
         influence_result = await self._step_influence_analysis(
-            df, weather_df, event_queue, message
+            df, weather_df, event_queue, message, region_match.region_info if region_match else None
         )
         print(f"[Influence] 影响因子分析完成，结果: {influence_result}")
 
         # 保存影响因子数据（兼容原有emotion字段）
         message.save_emotion(
             influence_result.get("overall_score", 0), 
-            influence_result.get("description", "影响因素分析")
+            influence_result.get("summary", "影响因素分析")
         )
 
         await self._emit_event(
@@ -768,14 +770,14 @@ class StreamingTaskProcessor:
                 "step": 4,
                 "data": {
                     "trend": features.get("trend", "N/A"),
-                    "influence": influence_result.get("description", "影响因素分析"),
+                    "influence": influence_result.get("summary", "影响因素分析"),
                 },
             },
         )
         message.update_step_detail(
             4,
             "completed",
-            f"趋势: {features.get('trend', 'N/A')}, 影响因素: {influence_result.get('description', '分析完成')}",
+            f"趋势: {features.get('trend', 'N/A')}, 影响因素: {influence_result.get('summary', '分析完成')}",
         )
 
         # === Step 5: 模型预测 ===
@@ -1115,21 +1117,15 @@ class StreamingTaskProcessor:
         weather_df: Optional[pd.DataFrame],
         event_queue: asyncio.Queue | None,
         message: Message,
+        region_info: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """多因素影响力分析（替代情绪分析）"""
         
-        # 如果没有天气数据，返回默认值
-        if weather_df is None or weather_df.empty:
-            default_result = {
-                "temperature_influence": 0.5,
-                "humidity_influence": 0.3,
-                "seasonality_influence": 0.4,
-                "trend_influence": 0.6,
-                "volatility_influence": 0.3,
-                "overall_score": 0.0,
-                "description": "天气数据不足，使用默认影响因子"
-            }
-            print(f"[Influence] 天气数据为空，发送默认影响因子: {default_result}")
+        # 如果没有供电数据或天气数据，返回默认值
+        if power_df is None or power_df.empty or weather_df is None or weather_df.empty:
+            default_result = InfluenceAnalyzer._get_default_result()
+            default_result["overall_score"] = 0.0
+            print(f"[Influence] 数据不足，发送默认影响因子")
             await self._emit_event(
                 event_queue,
                 message,
@@ -1141,26 +1137,67 @@ class StreamingTaskProcessor:
             )
             return default_result
         
-        # 计算影响因子
+        # 获取日期范围
+        start_date = power_df['ds'].min()
+        end_date = power_df['ds'].max()
+        
+        # 标准化日期格式（移除时区）
+        if hasattr(start_date, 'tz') and start_date.tz is not None:
+            start_date = start_date.tz_localize(None)
+        if hasattr(end_date, 'tz') and end_date.tz is not None:
+            end_date = end_date.tz_localize(None)
+        
+        start_date_str = start_date.strftime('%Y-%m-%d')
+        end_date_str = end_date.strftime('%Y-%m-%d')
+        
+        # 创建空的节假日数据（已废弃，保留以兼容接口）
+        holiday_df = pd.DataFrame(columns=['date', 'is_holiday', 'holiday_score'])
+        
+        # 获取城市工业结构数据
+        industry_structure_ratio = 0.3  # 默认值（全国平均工业结构比例约30%）
+        if region_info and region_info.region_name:
+            industry_structure_client = get_industry_structure_client()
+            try:
+                # 调用LLM获取城市工业结构数据（非async函数，使用线程执行）
+                structure_data = await asyncio.to_thread(
+                    industry_structure_client.fetch_industry_structure_data,
+                    region_info.region_name
+                )
+                industry_structure_ratio = structure_data.get('second_industry_ratio', 0.3)
+                print(f"[Influence] 获取城市工业结构数据: {region_info.region_name}, 比例={industry_structure_ratio:.2%}")
+            except Exception as e:
+                print(f"[Influence] 获取城市工业结构数据失败: {e}，使用默认值0.3")
+        else:
+            print(f"[Influence] 未提供城市名称，使用默认工业结构比例0.3")
+        
+        # 计算影响因子（使用新方法）
         influence_result = await asyncio.to_thread(
-            InfluenceAnalyzer.analyze_weather_influence,
+            InfluenceAnalyzer.analyze_factors_influence,
             power_df,
-            weather_df
+            weather_df,
+            holiday_df,
+            industry_structure_ratio
         )
         
-        # 计算总体得分（各因素的平均值）
-        overall_score = (
-            influence_result.get("temperature_influence", 0) +
-            influence_result.get("humidity_influence", 0) +
-            influence_result.get("seasonality_influence", 0) +
-            influence_result.get("trend_influence", 0) +
-            influence_result.get("volatility_influence", 0)
-        ) / 5
+        # 计算总体得分（各因素影响力得分的平均值，过滤NaN值）
+        if influence_result.get('ranking'):
+            valid_scores = [
+                factor['influence_score'] 
+                for factor in influence_result['ranking']
+                if not (np.isnan(factor.get('influence_score', np.nan)) or np.isinf(factor.get('influence_score', np.nan)))
+            ]
+            overall_score = np.mean(valid_scores) if valid_scores else 0.0
+        else:
+            overall_score = 0.0
         
-        influence_result["overall_score"] = round(overall_score, 2)
+        # 确保overall_score不是NaN
+        if np.isnan(overall_score) or np.isinf(overall_score):
+            overall_score = 0.0
+        
+        influence_result["overall_score"] = round(float(overall_score), 4)
         
         # 发送影响因子数据
-        print(f"[Influence] 发送影响因子数据: {influence_result}")
+        print(f"[Influence] 发送影响因子数据: {len(influence_result.get('ranking', []))} 个因子")
         await self._emit_event(
             event_queue,
             message,
@@ -1333,19 +1370,41 @@ class StreamingTaskProcessor:
             data.stream_status = status
             message._save(data)
 
+    def _clean_nan_values(self, obj):
+        """递归清理字典和列表中的NaN值，转换为None"""
+        if isinstance(obj, dict):
+            return {k: self._clean_nan_values(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._clean_nan_values(item) for item in obj]
+        elif isinstance(obj, float):
+            if np.isnan(obj) or np.isinf(obj):
+                return None
+            return obj
+        elif isinstance(obj, np.floating):
+            if np.isnan(obj) or np.isinf(obj):
+                return None
+            return float(obj)
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        else:
+            return obj
+
     async def _emit_event(
         self, event_queue: asyncio.Queue | None, message: Message, event: Dict
     ):
         """发送事件到队列、PubSub 和 Stream"""
+        
+        # 清理NaN值以便JSON序列化
+        event_clean = self._clean_nan_values(event)
 
         # 1. 发送到本地队列（如果存在）
         if event_queue:
-            await event_queue.put(event)
+            await event_queue.put(event_clean)
 
         try:
             # 2. 即时发布到 PubSub
             channel = f"stream:{message.message_id}"
-            json_payload = json.dumps(event)
+            json_payload = json.dumps(event_clean, ensure_ascii=False)
             self.redis.publish(channel, json_payload)
 
             # 3. 持久化到 Stream（供断点续传使用）

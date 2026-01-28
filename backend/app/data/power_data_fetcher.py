@@ -164,41 +164,54 @@ class PowerDataFetcher:
     async def fetch_power_data(
         self,
         city_name: str,
-        start_date: str,
-        end_date: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
         historical_days: Optional[int] = None,
+        forecast_days: Optional[int] = None,
     ):
         """
         获取供电需求数据（基于天气数据生成）
         
         Args:
             city_name: 城市名称，如"北京"
-            start_date: 开始日期，如 "20240101" 或 "2024-01-01"
-            end_date: 结束日期，如 "20250101" 或 "2025-01-01"
-            historical_days: 历史天数（如果指定，会获取更多历史数据用于训练）
+            start_date: 开始日期，如 "20240101" 或 "2024-01-01"（可选，默认使用近未来模式）
+            end_date: 结束日期，如 "20250101" 或 "2025-01-01"（可选，默认使用近未来模式）
+            historical_days: 历史天数（默认30天，用于近未来模式）
+            forecast_days: 未来天数（默认7天，用于近未来模式）
         
         Returns:
             标准化的 DataFrame，包含 ds (日期) 和 y (供电需求MW) 列
         """
-        # 标准化日期格式（添加时区信息）
-        try:
-            if len(start_date) == 8:  # YYYYMMDD
-                start_dt = datetime.strptime(start_date, "%Y%m%d").replace(tzinfo=BEIJING_TZ)
-            else:  # YYYY-MM-DD
-                start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
+        now = datetime.now(BEIJING_TZ)
+        
+        # 如果未指定日期范围，使用"近未来"模式（历史30天+未来7天）
+        if start_date is None or end_date is None:
+            if historical_days is None:
+                historical_days = 30  # 默认历史30天
+            if forecast_days is None:
+                forecast_days = 7  # 默认未来7天
             
-            if len(end_date) == 8:  # YYYYMMDD
-                end_dt = datetime.strptime(end_date, "%Y%m%d").replace(tzinfo=BEIJING_TZ)
-            else:  # YYYY-MM-DD
-                end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
-        except ValueError as e:
-            raise ValueError(f"日期格式错误: {start_date} 或 {end_date}")
+            start_dt = now - timedelta(days=historical_days)
+            end_dt = now + timedelta(days=forecast_days)
+        else:
+            # 标准化日期格式（添加时区信息）
+            try:
+                if len(start_date) == 8:  # YYYYMMDD
+                    start_dt = datetime.strptime(start_date, "%Y%m%d").replace(tzinfo=BEIJING_TZ)
+                else:  # YYYY-MM-DD
+                    start_dt = datetime.strptime(start_date, "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
+                
+                if len(end_date) == 8:  # YYYYMMDD
+                    end_dt = datetime.strptime(end_date, "%Y%m%d").replace(tzinfo=BEIJING_TZ)
+                else:  # YYYY-MM-DD
+                    end_dt = datetime.strptime(end_date, "%Y-%m-%d").replace(tzinfo=BEIJING_TZ)
+            except ValueError as e:
+                raise ValueError(f"日期格式错误: {start_date} 或 {end_date}")
 
         # 计算需要获取的历史天数
-        now = datetime.now(BEIJING_TZ)
         if historical_days is None:
-            # 默认获取从开始日期到结束日期的数据
-            days_diff = (end_dt - start_dt).days + 1
+            # 计算从开始日期到现在的天数
+            days_diff = (now - start_dt).days + 1
             historical_days = max(days_diff, 10)  # 至少10天
         
         # 限制历史天数（Open-Meteo最多支持92天历史数据）
@@ -209,7 +222,8 @@ class PowerDataFetcher:
             end_dt = end_dt.replace(tzinfo=BEIJING_TZ)
         
         # 计算未来天数
-        forecast_days = max((end_dt - now).days + 1, 0)
+        if forecast_days is None:
+            forecast_days = max((end_dt - now).days + 1, 0)
         forecast_days = min(forecast_days, 14)  # 最多14天
         
         # 获取天气数据（历史+未来）

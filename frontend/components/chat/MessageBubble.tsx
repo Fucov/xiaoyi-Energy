@@ -8,6 +8,8 @@ import { MessageContent } from './MessageContent'
 import { StepProgress } from './StepProgress'
 import { ThinkingSection } from './ThinkingSection'
 import { RAGSourceCard } from './RAGSourceCard'
+import { MultiFactorInfluencePanel } from './MultiFactorInfluencePanel'
+import type { InfluenceAnalysisResult } from '@/lib/api/analysis'
 
 interface MessageBubbleProps {
   message: Message
@@ -379,7 +381,8 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                 ) || tables[0]
 
                 // 解析影响因子数据或情绪数据
-                let influenceData: {
+                let influenceData: InfluenceAnalysisResult | null = null
+                let legacyInfluenceData: {
                   temperature_influence?: number
                   humidity_influence?: number
                   seasonality_influence?: number
@@ -391,15 +394,30 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                 
                 if (emotionText && emotionText.type === 'text') {
                   console.log('[MessageBubble] Found emotionText:', emotionText.text.substring(0, 100))
-                  // 优先解析影响因子数据
+                  // 优先解析新的影响因子数据格式
                   const influenceMatch = emotionText.text.match(/__INFLUENCE_MARKER__([\s\S]*)__/)
                   if (influenceMatch) {
                     console.log('[MessageBubble] Matched INFLUENCE_MARKER, parsing JSON...')
                     try {
-                      influenceData = JSON.parse(influenceMatch[1])
-                      console.log('[MessageBubble] Parsed influence data:', influenceData)
+                      const parsed = JSON.parse(influenceMatch[1])
+                      // 检查是否是新格式（包含factors字段）
+                      if (parsed.factors && parsed.correlation_matrix) {
+                        // 清理NaN值
+                        const cleaned = JSON.parse(JSON.stringify(parsed, (key, value) => {
+                          if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) {
+                            return 0
+                          }
+                          return value
+                        }))
+                        influenceData = cleaned as InfluenceAnalysisResult
+                        console.log('[MessageBubble] Parsed new format influence data:', influenceData)
+                      } else {
+                        // 兼容旧格式
+                        legacyInfluenceData = parsed
+                        console.log('[MessageBubble] Parsed legacy format influence data')
+                      }
                     } catch (e) {
-                      console.error('[MessageBubble] Failed to parse influence data:', e, 'Raw match:', influenceMatch[1])
+                      console.error('[MessageBubble] Failed to parse influence data:', e, 'Raw match:', influenceMatch[1]?.substring(0, 200))
                     }
                   } else {
                     // 兼容旧的情绪数据格式
@@ -425,16 +443,23 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     message.isCollapsing && "animate-collapse"
                   )}>
                     {/* 上半部分：左右分栏 - 多因素影响力分析(1) | 相关新闻+研报(2) */}
-                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
+                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">
                       {/* 左侧：多因素影响力分析 */}
                       <div className="glass rounded-2xl p-4">
-                        <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                          <span>📊</span> 多因素影响力分析
-                        </h3>
                         {influenceData ? (
-                          <MultiFactorInfluenceAxis influenceData={influenceData} />
+                          <MultiFactorInfluencePanel influenceData={influenceData} />
+                        ) : legacyInfluenceData ? (
+                          <div>
+                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                              <span>📊</span> 多因素影响力分析
+                            </h3>
+                            <MultiFactorInfluenceAxis influenceData={legacyInfluenceData} />
+                          </div>
                         ) : emotionData ? (
                           <div className="space-y-3">
+                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                              <span>📊</span> 影响因素分析
+                            </h3>
                             <EmotionGauge emotion={emotionData.score} description="" />
                             {emotionData.description && (
                               <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
@@ -453,17 +478,31 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                       {/* 右侧：相关新闻 + 研报来源（1:1 高度比例） */}
                       <div className="grid grid-rows-2 gap-4 min-h-[400px]">
                         {/* 相关新闻（占 1 份高度） */}
-                        <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
-                          <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
-                            <span>📰</span> 相关新闻
-                          </h3>
-                          <div className="flex-1 overflow-y-auto">
+                        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-purple-500/5" />
+                          <div className="relative flex-shrink-0 mb-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="p-1.5 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30">
+                                  <span className="text-base">📰</span>
+                                </div>
+                                <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
+                                  相关新闻
+                                </h3>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex-1 relative">
                             {newsTable ? (
-                              <MessageContent content={newsTable} />
+                              <div>
+                                <MessageContent content={newsTable} />
+                              </div>
                             ) : (
-                              <div className="text-sm text-gray-400 flex items-center gap-2">
-                                <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-                                <span>正在获取新闻...</span>
+                              <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                                <div className="relative mb-3">
+                                  <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+                                </div>
+                                <span className="text-sm">正在获取新闻...</span>
                               </div>
                             )}
                           </div>
@@ -471,30 +510,53 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
                         {/* 研报来源（占 2 份高度） */}
                         {message.ragSources && message.ragSources.length > 0 ? (
-                          <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
-                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
-                              <span>📚</span> 研报来源
-                              <span className="text-xs text-gray-500 font-normal">
-                                ({message.ragSources.length} 篇相关研报)
-                              </span>
-                            </h3>
-                            <div className="flex-1 overflow-y-auto">
-                              <RAGSourceCard sources={message.ragSources} />
+                          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                            <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
+                            <div className="relative flex-shrink-0 mb-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
+                                    <span className="text-base">📚</span>
+                                  </div>
+                                  <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
+                                    研报来源
+                                  </h3>
+                                  <span className="text-xs text-gray-500 px-2 py-0.5 bg-dark-700/50 rounded border border-white/5 font-normal">
+                                    {message.ragSources.length} 篇
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex-1 relative">
+                              <div>
+                                <RAGSourceCard sources={message.ragSources} />
+                              </div>
                             </div>
                           </div>
                         ) : (
-                          <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
-                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
-                              <span>📚</span> 研报来源
-                            </h3>
-                            <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-                              <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse mr-2" />
-                              <span>正在检索研报...</span>
+                          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                            <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
+                            <div className="relative flex-shrink-0 mb-4">
+                              <div className="flex items-center gap-2">
+                                <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
+                                  <span className="text-base">📚</span>
+                                </div>
+                                <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
+                                  研报来源
+                                </h3>
+                              </div>
+                            </div>
+                            <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                              <div className="relative mb-3">
+                                <div className="w-10 h-10 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
+                              </div>
+                              <span className="text-sm">正在检索研报...</span>
                             </div>
                           </div>
                         )}
                       </div>
                     </div>
+
 
                     {/* 价格预测趋势图（全宽） */}
                     <div className="glass rounded-2xl p-4">
