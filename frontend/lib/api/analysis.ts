@@ -150,6 +150,15 @@ export interface MessageData {
   }>
   anomaly_zones_ticker: string | null
 
+  // 变点检测（预测部分的显著变化）
+  change_points: Array<{
+    date: string
+    index: number
+    type: string
+    magnitude: number
+    reason: string
+  }>
+
   conclusion: string
 
   // 思考日志 (累积显示所有 LLM 调用的原始输出)

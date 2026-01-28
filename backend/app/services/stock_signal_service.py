@@ -189,7 +189,7 @@ class StockSignalService:
         # Step 2: Clustering
         zones = self.adaptive_clustering(df_with_scores)
 
-        # Step 3: Fallback
+        # Step 3: Fallback··
         if len(zones) == 0:
             zones = self.fallback_top_points(df_with_scores, k=2)
             is_calm = True
@@ -303,7 +303,7 @@ class StockSignalService:
         """Generate human-readable reason for significant point."""
         reasons = []
         if row["s_vol"] > 2:
-            reasons.append("价格异常波动")
+            reasons.append("供电量异常波动")
         if row["is_max"]:
             reasons.append("阶段性见顶")
         if row["is_min"]:
@@ -316,3 +316,119 @@ class StockSignalService:
             reasons.append("舆情热度爆发")
 
         return "、".join(reasons) if reasons else "趋势关键节点"
+
+    # ==========================================
+    # Part 3: Change Point Detection (Power Domain)
+    # ==========================================
+
+    def detect_change_points(
+        self, df: pd.DataFrame, window_size: int = 5, threshold: float = 1.5
+    ) -> List[Dict]:
+        """
+        Detect significant change points (sudden mean shifts) in the time series.
+        Using a sliding window Difference of Means (DoM) approach.
+
+        Args:
+            df: DataFrame with 'date' and 'y' (value) columns.
+            window_size: Size of the window before and after to compare.
+            threshold: Z-score threshold for significance.
+
+        Returns:
+            List of dictionaries with change point details.
+        """
+        if df.empty or len(df) < window_size * 2:
+            return []
+
+        df = df.copy()
+        # Ensure we have the target column 'y' (prophet format) or 'close' (stock format)
+        target_col = "y" if "y" in df.columns else "close"
+
+        values = df[target_col].values
+        dates = df["date"].astype(str).str[:10].tolist()
+        n = len(values)
+
+        change_points = []
+
+        # Calculate rolling statistics for global context
+        global_std = np.std(values)
+        if global_std == 0:
+            return []
+
+        # Sliding window DoM
+        for i in range(window_size, n - window_size):
+            # Window before: [i-window_size : i]
+            # Window after:  [i : i+window_size]
+            before = values[i - window_size : i]
+            after = values[i : i + window_size]
+
+            mean_before = np.mean(before)
+            mean_after = np.mean(after)
+
+            diff = mean_after - mean_before
+
+            # Key metric: Difference normalized by global std dev
+            # This represents "how many standard deviations did the level shift?"
+            score = abs(diff) / global_std
+
+            if score > threshold:
+                # Local check: is this a local maximum of change?
+                # This prevents consecutive points triggering for the same step
+                neighbor_scores = []
+                for j in range(max(window_size, i - 2), min(n - window_size, i + 3)):
+                    if j == i:
+                        continue
+
+                    b = values[j - window_size : j]
+                    a = values[j : j + window_size]
+                    neighbor_scores.append(abs(np.mean(a) - np.mean(b)) / global_std)
+
+                if not neighbor_scores or score >= max(neighbor_scores):
+                    change_points.append(
+                        {
+                            "date": dates[i],
+                            "index": i,
+                            "type": "rise" if diff > 0 else "drop",
+                            "magnitude": float(score),  # Z-score of the shift
+                            "diff_val": float(diff),  # Absolute value difference
+                            "confidence": min(
+                                float(score / threshold) * 0.5 + 0.5, 0.99
+                            ),
+                        }
+                    )
+
+        # Sort by magnitude descent
+        change_points.sort(key=lambda x: x["magnitude"], reverse=True)
+
+        # Fallback: if no points found with high threshold, try lower threshold
+        if not change_points and threshold > 0.5:
+            # Just do a quick scan here to guarantee at least 1 point
+            # Find the max single-step change
+            max_score = 0
+            best_idx = -1
+            best_diff = 0
+
+            for i in range(window_size, n - window_size):
+                before = values[i - window_size : i]
+                after = values[i : i + window_size]
+                diff = np.mean(after) - np.mean(before)
+                score = abs(diff) / (global_std if global_std > 0 else 1)
+
+                if score > max_score:
+                    max_score = score
+                    best_idx = i
+                    best_diff = diff
+
+            if best_idx != -1:
+                change_points.append(
+                    {
+                        "date": dates[best_idx],
+                        "index": best_idx,
+                        "type": "rise" if best_diff > 0 else "drop",
+                        "magnitude": float(max_score),
+                        "diff_val": float(best_diff),
+                        "confidence": 0.5,  # Lower confidence for fallback
+                        "is_fallback": True,
+                    }
+                )
+
+        return change_points[:5]  # Return top 5 most significant changes

@@ -15,6 +15,7 @@ from .news import (
     fetch_news_all,
     search_web,
     fetch_domain_news,
+    search_news_around_date,
 )
 # fetch_akshare_news 已移除，不再需要
 
@@ -38,6 +39,7 @@ __all__ = [
     "fetch_news_all",
     "search_web",
     "fetch_domain_news",
+    "search_news_around_date",
     # analysis.py
     "recommend_forecast_params",
     # forecast.py

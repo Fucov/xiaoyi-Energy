@@ -288,7 +288,7 @@ export function StockWidget({ ticker, title }: StockWidgetProps) {
                 </div>
             )}
 
-            {/* 价格信息 */}
+            {/* 供电量信息 */}
             <div className="flex items-center gap-4 mb-3">
                 <div className="text-2xl font-bold text-gray-200">${currentPrice.toFixed(2)}</div>
                 <div className={`text-sm ${priceChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
