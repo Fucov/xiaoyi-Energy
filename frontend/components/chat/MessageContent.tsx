@@ -604,6 +604,65 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       return merged;
     };
 
+    // Smoothing Logic: Absorb small "noise" zones into surrounding trends (Sandwich Logic)
+    // e.g. UP (Long) -> DOWN (Short) -> UP (Long)  => Merge all to UP
+    const smoothSemanticZones = (zones: any[]) => {
+      if (!zones || zones.length < 3) return zones;
+
+      let smoothed = [...zones];
+      let changed = true;
+
+      // Multi-pass to handle cascading merges
+      while (changed) {
+        changed = false;
+        const result = [];
+        let i = 0;
+
+        while (i < smoothed.length) {
+          const prev: any = result.length > 0 ? result[result.length - 1] : null;
+          const curr = smoothed[i];
+          const next = i + 1 < smoothed.length ? smoothed[i + 1] : null;
+
+          let merged = false;
+
+          // Check Sandwich: Prev and Next matched direction, Curr is opposite but "Small"
+          if (prev && next) {
+            const prevDir = (prev.avg_return || 0) > 0 ? 1 : -1;
+            const nextDir = (next.avg_return || 0) > 0 ? 1 : -1;
+            const currDir = (curr.avg_return || 0) > 0 ? 1 : -1;
+
+            if (prevDir === nextDir && currDir !== prevDir) {
+              // Check if Curr is "Small/Noise"
+              const currDuration = (new Date(curr.endDate).getTime() - new Date(curr.startDate).getTime()) / (1000 * 60 * 60 * 24);
+              const isShort = currDuration <= 7; // 7 days threshold for noise
+              const isWeak = Math.abs(curr.avg_return || 0) < 0.05; // 5% threshold
+
+              if (isShort || isWeak) {
+                // MERGE ALL THREE into Prev (effectively absorbing curr and next)
+                result[result.length - 1] = {
+                  ...prev,
+                  endDate: next.endDate,
+                  events: [...(prev.events || []), ...(curr.events || []), ...(next.events || [])],
+                  // Weighted return approximation (simplistic)
+                  avg_return: (prev.avg_return + next.avg_return) / 2
+                };
+                i += 2; // Skip curr and next
+                merged = true;
+                changed = true;
+              }
+            }
+          }
+
+          if (!merged) {
+            result.push(curr);
+            i++;
+          }
+        }
+        smoothed = result;
+      }
+      return smoothed;
+    };
+
     // 1. If Backend already provided Semantic Zones, use them directly!
     // This supports "Event Flow" feature and robust backend merging
     if (semantic_zones.length > 0 || (prediction_semantic_zones && prediction_semantic_zones.length > 0)) {
@@ -641,6 +700,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       // predictionZones: First aggregate events, THEN merge adjacent zones to form larger blocks
       predictionZones = predictionZones.map(z => aggregateRawZones(z, true));
       predictionZones = mergeSemanticZones(predictionZones);
+      predictionZones = smoothSemanticZones(predictionZones);
 
       // Merge history and prediction zones
       return [
@@ -691,7 +751,8 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       })));
 
       // 3. Convert and Merge Prediction
-      const semanticPrediction = mergeSemanticZones(rawPrediction.map(z => ({
+      // Apply: Strict Merge -> Smooth Noise -> Strict Merge (Cleanup)
+      let semanticPrediction = mergeSemanticZones(rawPrediction.map(z => ({
         ...z,
         isPrediction: true,
         events: [{
@@ -706,6 +767,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           sentiment: z.sentiment
         }]
       })));
+
+      // Apply Smoothing to Prediction to fix fragmentation
+      semanticPrediction = smoothSemanticZones(semanticPrediction);
 
       return [...semanticHistory, ...semanticPrediction];
     }
