@@ -353,9 +353,8 @@ async def backtest_prediction(request: "BacktestRequest"):
     train_points = original_data[:split_index]
     ground_truth_points = original_data[split_index:]
     
-    # 4. 计算horizon: max(90天, ground_truth长度)
-    # 这样即使ground_truth较短，也会显示完整的90天预测
-    horizon = max(90, len(ground_truth_points))
+    # 4. 计算horizon: 使用 ground_truth 长度，至少30天
+    horizon = max(30, len(ground_truth_points))
 
     # 转换为DataFrame
     df = pd.DataFrame({
@@ -363,13 +362,24 @@ async def backtest_prediction(request: "BacktestRequest"):
         "y": [p.value for p in train_points]
     })
 
-    # 运行预测（从 MessageData 获取模型名称）
-    model_to_use = data.model_name if data.model_name else "prophet"
+    # 运行预测（从 MessageData 获取模型名称，默认与预测保持一致使用 historical_average）
+    model_to_use = data.model_name if data.model_name else "historical_average"
+
+    # 获取城市名称（historical_average 模型需要）
+    city_name = None
+    if data.unified_intent and data.unified_intent.region_name:
+        city_name = data.unified_intent.region_name
+
+    # 如果是 historical_average 但没有城市名，回退到 prophet
+    if model_to_use == "historical_average" and not city_name:
+        model_to_use = "prophet"
+
     forecast_result = await run_forecast(
         df,
         model_to_use,
         horizon,
-        {}  # Prophet参数
+        {},  # Prophet参数
+        city_name=city_name
     )
     
     # 提取预测结果（forecast_result 是 ForecastResult 对象）
