@@ -541,10 +541,12 @@ class StreamingTaskProcessor:
         print(
             f"[AnomalyZones] Starting dynamic clustering for message {message.message_id}"
         )
+        anomaly_zones = []
         try:
             import pandas as pd
             from app.services.stock_signal_service import StockSignalService
             from app.agents.event_summary_agent import EventSummaryAgent
+            from app.services.trend_service import TrendService
 
             # 从 df 提取日期、收盘价、成交量
             sig_df = pd.DataFrame(
@@ -582,14 +584,17 @@ class StreamingTaskProcessor:
             if not cached_zones_json:
                 # 1. Trend Analysis (Regime Segmentation)
                 trend_service = TrendService()
-                # Use all methods but prefer PLR for visual zones
-                trend_results = trend_service.analyze_trend(sig_df, method="plr")
+                # Use all methods to get both segments and points
+                trend_results = trend_service.analyze_trend(sig_df, method="all")
 
                 # Debug Prints for Trend Algorithms
                 print("\n" + "=" * 50)
                 plr_list = trend_results.get("plr", [])
+                pelt_list = trend_results.get("pelt", [])
+
+                print(f"\n📈 [ALGO 3/6] Bottom-Up PLR: Found {len(plr_list)} segments.")
                 print(
-                    f"\n📈 [ALGO 3/6] Bottom-Up PLR: Found {len(plr_list)} segments. Verifying Continuity:"
+                    f"📍 [ALGO 1/6] PELT Change Points: Found {len(pelt_list)} points."
                 )
                 for i, seg in enumerate(plr_list):
                     print(
@@ -791,7 +796,11 @@ class StreamingTaskProcessor:
                     {
                         "type": "data",
                         "data_type": "anomaly_zones",
-                        "data": {"zones": anomaly_zones, "ticker": region_code},
+                        "data": {
+                            "zones": anomaly_zones,
+                            "anomalies": trend_results.get("pelt", []),
+                            "ticker": region_code,
+                        },
                     },
                 )
                 print(f"[AnomalyZones] Successfully saved and emitted")
@@ -958,6 +967,100 @@ class StreamingTaskProcessor:
                 "prediction_start_day": prediction_start,
             },
         )
+
+        # === 补充：计算预测部分的语义区间 (Reference Replication) ===
+        try:
+            if forecast_result.points:
+                # 1. 构造预测DataFrame
+                pred_df = pd.DataFrame(
+                    {
+                        "date": [p.date for p in forecast_result.points],
+                        "close": [p.value for p in forecast_result.points],
+                        "volume": [1] * len(forecast_result.points),  # Dummy volume
+                    }
+                )
+
+                # 2. 调用TrendService (使用 PLR + Semantic)
+                # 复用之前的 trend_service 实例，需重新实例化如果作用域不同
+                # 这里我们在外层，新建一个即可
+                from app.services.trend_service import TrendService
+
+                pred_trend_service = TrendService()
+                pred_trend_results = pred_trend_service.analyze_trend(
+                    pred_df, method="plr"
+                )
+                pred_plr = pred_trend_results.get("plr", [])
+
+                # 3. 生成 Semantic Regimes
+                pred_semantic = pred_trend_service.process_semantic_regimes(
+                    pred_plr, min_duration_days=3
+                )
+
+                # 4. 转换为 anomaly_zones 格式
+                pred_zones = []
+                for seg in pred_semantic:
+                    # Determine sentiment/color logic (Copied from above)
+                    sentiment = "neutral"
+                    direction = seg.get("direction", "").lower()
+                    seg_type = seg.get("type", "").lower()
+
+                    if direction == "up" or seg_type == "bull":
+                        sentiment = "positive"
+                    elif direction == "down" or seg_type == "bear":
+                        sentiment = "negative"
+
+                    # Calculate return
+                    try:
+                        start_p = float(seg.get("startPrice", 0))
+                        end_p = float(seg.get("endPrice", 0))
+                        change_pct = (end_p - start_p) / start_p if start_p else 0
+                    except:
+                        change_pct = 0
+
+                    pred_zones.append(
+                        {
+                            "startDate": seg["startDate"],
+                            "endDate": seg["endDate"],
+                            "avg_return": change_pct,
+                            "avg_score": abs(change_pct) * 10,
+                            "zone_type": "prediction_regime",  # Special Type
+                            "method": "plr_prediction",
+                            "sentiment": sentiment,
+                            "summary": f"预测趋势: {seg.get('direction', 'Phase').title()} ({change_pct * 100:.1f}%)",
+                            "description": f"预测阶段 {seg['startDate']} 至 {seg['endDate']}",
+                            "type": seg_type,
+                            "normalizedType": seg_type,
+                            "direction": direction,
+                            "events": seg.get("events", []),
+                            "is_prediction": True,
+                        }
+                    )
+
+                print(f"[AnomalyZones] 🔮 Generated {len(pred_zones)} prediction zones")
+
+                # 5. 合并并发送更新
+                if pred_zones:
+                    # 确保 anomaly_zones 包含所有历史 + 预测
+                    # 此时 anomaly_zones 包含历史。Append directy.
+                    # Copy to avoid weird reference issues if looping
+                    combined_zones = anomaly_zones + pred_zones
+
+                    message.save_anomaly_zones(combined_zones, region_code)
+
+                    await self._emit_event(
+                        event_queue,
+                        message,
+                        {
+                            "type": "data",
+                            "data_type": "anomaly_zones",
+                            "data": {"zones": combined_zones, "ticker": region_code},
+                        },
+                    )
+        except Exception as e:
+            print(f"[AnomalyZones] Prediction zone generation error: {e}")
+            import traceback
+
+            print(traceback.format_exc())
 
         metrics = forecast_result.metrics
         metrics_dict = {"mae": metrics.mae}

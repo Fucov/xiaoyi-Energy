@@ -8,98 +8,13 @@ import { MessageContent } from './MessageContent'
 import { StepProgress } from './StepProgress'
 import { ThinkingSection } from './ThinkingSection'
 import { RAGSourceCard } from './RAGSourceCard'
-import { MultiFactorInfluencePanel } from './MultiFactorInfluencePanel'
-import type { InfluenceAnalysisResult } from '@/lib/api/analysis'
 
 interface MessageBubbleProps {
   message: Message
   onRegenerateMessage?: () => void
 }
 
-// 多因素影响力轴组件
-function MultiFactorInfluenceAxis({
-  influenceData
-}: {
-  influenceData: {
-    temperature_influence?: number
-    humidity_influence?: number
-    seasonality_influence?: number
-    trend_influence?: number
-    volatility_influence?: number
-    description?: string
-  } | null
-}) {
-  if (!influenceData) {
-    return (
-      <div className="text-sm text-gray-400 flex items-center gap-2">
-        <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-        <span>相关性分析中...</span>
-      </div>
-    )
-  }
-
-  const factors = [
-    {
-      label: '温度影响',
-      value: influenceData.temperature_influence ?? 0.5,
-      color: 'bg-cyan-400'
-    },
-    {
-      label: '湿度影响',
-      value: influenceData.humidity_influence ?? 0.3,
-      color: 'bg-purple-400'
-    },
-    {
-      label: '季节性',
-      value: influenceData.seasonality_influence ?? 0.4,
-      color: 'bg-purple-400'
-    },
-    {
-      label: '趋势强度',
-      value: influenceData.trend_influence ?? 0.6,
-      color: 'bg-orange-400'
-    },
-    {
-      label: '波动性',
-      value: influenceData.volatility_influence ?? 0.3,
-      color: 'bg-green-400'
-    },
-  ]
-
-  return (
-    <div className="space-y-4">
-      {/* 多因素相关性轴 */}
-      <div className="space-y-3">
-        {factors.map((factor, index) => (
-          <div key={index} className="space-y-1">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-gray-300">{factor.label}</span>
-              <span className="text-sm font-semibold text-gray-200">{factor.value.toFixed(2)}</span>
-            </div>
-            {/* 进度条 */}
-            <div className="relative h-2 rounded-full overflow-hidden bg-dark-500">
-              <div
-                className={`h-full ${factor.color} transition-all duration-1000 ease-out`}
-                style={{ width: `${factor.value * 100}%` }}
-              />
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* 分析说明 */}
-      {influenceData.description && (
-        <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
-          <p className="text-sm text-gray-300 leading-relaxed whitespace-pre-line">
-            {influenceData.description}
-          </p>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// 情绪横向标尺组件（保留以兼容）
+// 情绪横向标尺组件
 function EmotionGauge({ emotion, description }: { emotion: number; description: string }) {
   // 将情绪值从 [-1, 1] 映射到百分比 [0%, 100%]
   const position = ((emotion + 1) / 2) * 100
@@ -288,19 +203,18 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                 const texts = contents.filter(c => c.type === 'text')
 
                 // 识别市场情绪内容（特殊标记）
-                // 查找影响因子或情绪数据标记
                 const emotionText = texts.find(t =>
-                  t.type === 'text' && (t.text.startsWith('__INFLUENCE_MARKER__') || t.text.startsWith('__EMOTION_MARKER__'))
+                  t.type === 'text' && t.text.startsWith('__EMOTION_MARKER__')
                 )
 
                 // 🎯 判断是否是简单问答
-                // 有结构化数据（图表、表格、情绪、影响因子）时强制使用结构化布局，不管 renderMode 是什么
+                // 有结构化数据（图表、表格、情绪）时强制使用结构化布局，不管 renderMode 是什么
                 const hasStructuredData = charts.length > 0 || tables.length > 0 || emotionText
                 const isSimpleAnswer = !hasStructuredData && (
                   renderMode === 'chat' || (
                     !hasSteps &&
                     texts.length > 0 &&
-                    texts.every(t => !t.text.startsWith('__EMOTION_MARKER__') && !t.text.startsWith('__INFLUENCE_MARKER__'))
+                    texts.every(t => !t.text.startsWith('__EMOTION_MARKER__'))
                   )
                 )
 
@@ -360,15 +274,15 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                 // 结构化回答：有图表、表格或情绪数据
                 // 识别综合分析报告（通常是最后一个文本内容，且不是情绪标记）
                 const reportText = texts.filter(t =>
-                  t.type === 'text' && !t.text.startsWith('__EMOTION_MARKER__') && !t.text.startsWith('__INFLUENCE_MARKER__')
+                  t.type === 'text' && !t.text.startsWith('__EMOTION_MARKER__')
                 ).pop() // 取最后一个文本作为报告
 
-                // 识别供电量走势图表（包含"历史供电量"或"预测供电量"）
+                // 识别价格走势图表（包含"历史价格"或"预测价格"）
                 const priceChart = charts.find(c =>
                   c.type === 'chart' && (
                     c.title?.includes('预测') ||
                     c.title?.includes('走势') ||
-                    c.data.datasets.some(d => d.label?.includes('供电量'))
+                    c.data.datasets.some(d => d.label?.includes('价格'))
                   )
                 )
 
@@ -380,69 +294,18 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                   )
                 ) || tables[0]
 
-                // 解析影响因子数据或情绪数据
-                let influenceData: InfluenceAnalysisResult | null = null
-                let legacyInfluenceData: {
-                  temperature_influence?: number
-                  humidity_influence?: number
-                  seasonality_influence?: number
-                  trend_influence?: number
-                  volatility_influence?: number
-                  description?: string
-                } | null = null
+                // 解析情绪数据
                 let emotionData: { score: number; description: string } | null = null
-
                 if (emotionText && emotionText.type === 'text') {
-                  console.log('[MessageBubble] Found emotionText:', emotionText.text.substring(0, 100))
-                  // 优先解析新的影响因子数据格式
-                  const influenceMatch = emotionText.text.match(/__INFLUENCE_MARKER__([\s\S]*)__/)
-                  if (influenceMatch) {
-                    // console.log('[MessageBubble] Matched INFLUENCE_MARKER, parsing JSON...')
-                    try {
-                      const parsed = JSON.parse(influenceMatch[1])
-                      // 检查是否是新格式（包含factors字段）
-                      if (parsed.factors && parsed.correlation_matrix) {
-                        // 清理NaN值
-                        const cleaned = JSON.parse(JSON.stringify(parsed, (key, value) => {
-                          if (typeof value === 'number' && (isNaN(value) || !isFinite(value))) {
-                            return 0
-                          }
-                          return value
-                        }))
-                        influenceData = cleaned as InfluenceAnalysisResult
-                        console.log('[MessageBubble] Parsed new format influence data:', influenceData)
-                      } else {
-                        // 兼容旧格式
-                        legacyInfluenceData = parsed
-                        console.log('[MessageBubble] Parsed legacy format influence data')
-                      }
-                    } catch (e) {
-                      console.error('[MessageBubble] Failed to parse influence data:', e, 'Raw match:', influenceMatch[1]?.substring(0, 200))
-                    }
-                  } else if (emotionText.text.startsWith('__INFLUENCE_MARKER__')) {
-                    // Fallback: try to substring if regex fails
-                    try {
-                      const jsonStr = emotionText.text.replace('__INFLUENCE_MARKER__', '').replace(/__$/, '')
-                      influenceData = JSON.parse(jsonStr)
-                    } catch (e) {
-                      console.error('[MessageBubble] Fallback parsing failed:', e)
-                    }
-                  } else {
-                    // 兼容旧的情绪数据格式
-                    const match = emotionText.text.match(/__EMOTION_MARKER__([^_]+)__([\s\S]*)__/)
-                    if (match) {
-                      console.log('[MessageBubble] Matched EMOTION_MARKER')
-                      const score = parseFloat(match[1])
-                      const description = match[2] || ''
-                      if (!isNaN(score)) {
-                        emotionData = { score, description }
-                      }
-                    } else {
-                      console.log('[MessageBubble] No marker found in emotionText')
+                  // 使用 [\s\S]* 匹配包括换行符在内的任意字符
+                  const match = emotionText.text.match(/__EMOTION_MARKER__([^_]+)__([\s\S]*)__/)
+                  if (match) {
+                    const score = parseFloat(match[1])
+                    const description = match[2] || ''
+                    if (!isNaN(score)) {
+                      emotionData = { score, description }
                     }
                   }
-                } else {
-                  console.log('[MessageBubble] No emotionText found')
                 }
 
                 return (
@@ -450,24 +313,15 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     "space-y-4",
                     message.isCollapsing && "animate-collapse"
                   )}>
-                    {/* 上半部分：左右分栏 - 多因素相关性分析(1) | 相关新闻+研报(2) */}
-                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-4">
-                      {/* 左侧：多因素相关性分析 */}
+                    {/* 上半部分：左右分栏 - 市场情绪(1) | 相关新闻+研报(2) */}
+                    <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
+                      {/* 左侧：市场情绪 */}
                       <div className="glass rounded-2xl p-4">
-                        {influenceData ? (
-                          <MultiFactorInfluencePanel influenceData={influenceData} />
-                        ) : legacyInfluenceData ? (
-                          <div>
-                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                              <span>📊</span> 多因素相关性分析
-                            </h3>
-                            <MultiFactorInfluenceAxis influenceData={legacyInfluenceData} />
-                          </div>
-                        ) : emotionData ? (
+                        <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                          <span>😊</span> 市场情绪
+                        </h3>
+                        {emotionData ? (
                           <div className="space-y-3">
-                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                              <span>📊</span> 相关性分析
-                            </h3>
                             <EmotionGauge emotion={emotionData.score} description="" />
                             {emotionData.description && (
                               <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
@@ -478,7 +332,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                         ) : (
                           <div className="text-sm text-gray-400 flex items-center gap-2">
                             <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-                            <span>相关性分析中...</span>
+                            <span>情绪分析中...</span>
                           </div>
                         )}
                       </div>
@@ -486,31 +340,17 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                       {/* 右侧：相关新闻 + 研报来源（1:1 高度比例） */}
                       <div className="grid grid-rows-2 gap-4 min-h-[400px]">
                         {/* 相关新闻（占 1 份高度） */}
-                        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
-                          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-purple-500/5" />
-                          <div className="relative flex-shrink-0 mb-4">
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <div className="p-1.5 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30">
-                                  <span className="text-base">📰</span>
-                                </div>
-                                <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
-                                  相关新闻
-                                </h3>
-                              </div>
-                            </div>
-                          </div>
-                          <div className="flex-1 relative">
+                        <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
+                          <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
+                            <span>📰</span> 相关新闻
+                          </h3>
+                          <div className="flex-1 overflow-y-auto">
                             {newsTable ? (
-                              <div>
-                                <MessageContent content={newsTable} />
-                              </div>
+                              <MessageContent content={newsTable} />
                             ) : (
-                              <div className="flex flex-col items-center justify-center h-full text-gray-400">
-                                <div className="relative mb-3">
-                                  <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
-                                </div>
-                                <span className="text-sm">正在获取新闻...</span>
+                              <div className="text-sm text-gray-400 flex items-center gap-2">
+                                <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
+                                <span>正在获取新闻...</span>
                               </div>
                             )}
                           </div>
@@ -518,57 +358,35 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
                         {/* 研报来源（占 2 份高度） */}
                         {message.ragSources && message.ragSources.length > 0 ? (
-                          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
-                            <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
-                            <div className="relative flex-shrink-0 mb-4">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-2">
-                                  <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
-                                    <span className="text-base">📚</span>
-                                  </div>
-                                  <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
-                                    研报来源
-                                  </h3>
-                                  <span className="text-xs text-gray-500 px-2 py-0.5 bg-dark-700/50 rounded border border-white/5 font-normal">
-                                    {message.ragSources.length} 篇
-                                  </span>
-                                </div>
-                              </div>
-                            </div>
-                            <div className="flex-1 relative">
-                              <div>
-                                <RAGSourceCard sources={message.ragSources} />
-                              </div>
+                          <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
+                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
+                              <span>📚</span> 研报来源
+                              <span className="text-xs text-gray-500 font-normal">
+                                ({message.ragSources.length} 篇相关研报)
+                              </span>
+                            </h3>
+                            <div className="flex-1 overflow-y-auto">
+                              <RAGSourceCard sources={message.ragSources} />
                             </div>
                           </div>
                         ) : (
-                          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
-                            <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
-                            <div className="relative flex-shrink-0 mb-4">
-                              <div className="flex items-center gap-2">
-                                <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
-                                  <span className="text-base">📚</span>
-                                </div>
-                                <h3 className="text-base font-semibold bg-gradient-to-r from-gray-200 to-gray-300 bg-clip-text text-transparent">
-                                  研报来源
-                                </h3>
-                              </div>
-                            </div>
-                            <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
-                              <div className="relative mb-3">
-                                <div className="w-10 h-10 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
-                              </div>
-                              <span className="text-sm">正在检索研报...</span>
+                          <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
+                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
+                              <span>📚</span> 研报来源
+                            </h3>
+                            <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
+                              <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse mr-2" />
+                              <span>正在检索研报...</span>
                             </div>
                           </div>
                         )}
                       </div>
                     </div>
 
-                    {/* 供电量预测趋势图（全宽） */}
+                    {/* 价格预测趋势图（全宽） */}
                     <div className="glass rounded-2xl p-4">
                       <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                        <span>📈</span> 供电量走势分析
+                        <span>📈</span> 价格走势分析
                       </h3>
                       {priceChart ? (
                         <MessageContent content={priceChart} />
@@ -598,9 +416,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     {/* 其他未分类的内容（向后兼容） */}
                     {contents.filter(c => {
                       if (c === priceChart || c === reportText) return false
-                      // 跳过影响因子和情绪标记文本（需要先检查是否为文本类型）
                       if (emotionText === c) return false
-                      if (c.type === 'text' && (c.text.startsWith('__INFLUENCE_MARKER__') || c.text.startsWith('__EMOTION_MARKER__'))) return false
                       if (newsTable === c) return false
                       return true
                     }).map((content, index) => (
