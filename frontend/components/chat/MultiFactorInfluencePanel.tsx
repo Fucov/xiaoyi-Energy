@@ -258,8 +258,8 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                       key={`cell-${index}`}
                       fill={`url(#gradient-${entry.factor})`}
                       className={`cursor-pointer transition-all duration-200 ${selectedFactor === entry.factor
-                          ? 'opacity-100 shadow-lg shadow-violet-500/20'
-                          : 'opacity-90 hover:opacity-100'
+                        ? 'opacity-100 shadow-lg shadow-violet-500/20'
+                        : 'opacity-90 hover:opacity-100'
                         }`}
                       onClick={() => setSelectedFactor(entry.factor)}
                       style={{
@@ -286,8 +286,8 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                     key={item.factor}
                     onClick={() => setSelectedFactor(item.factor)}
                     className={`group flex items-center justify-between gap-3 px-5 py-3 rounded-xl transition-all duration-200 ${isSelected
-                        ? 'bg-gradient-to-r from-violet-500/20 to-purple-500/20 border-2 border-violet-500/50 shadow-lg shadow-violet-500/20 scale-[1.02]'
-                        : 'bg-dark-700/40 border border-white/10 hover:border-violet-500/30 hover:bg-dark-700/60'
+                      ? 'bg-gradient-to-r from-violet-500/20 to-purple-500/20 border-2 border-violet-500/50 shadow-lg shadow-violet-500/20 scale-[1.02]'
+                      : 'bg-dark-700/40 border border-white/10 hover:border-violet-500/30 hover:bg-dark-700/60'
                       }`}
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
@@ -343,10 +343,10 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                   <span className="text-sm font-bold text-gray-200">{currentFactor.influence_score.toFixed(3)}</span>
                 </div>
                 <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${currentFactor.correlation > 0
-                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
-                    : currentFactor.correlation < 0
-                      ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                      : 'bg-dark-700/50 border-white/5 text-gray-400'
+                  ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+                  : currentFactor.correlation < 0
+                    ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                    : 'bg-dark-700/50 border-white/5 text-gray-400'
                   }`}>
                   {currentFactor.correlation > 0 ? (
                     <TrendingUp className="w-3.5 h-3.5" />

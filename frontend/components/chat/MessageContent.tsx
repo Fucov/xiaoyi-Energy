@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useMemo, useRef, useCallback, useEffect, Fragment } from 'react'
+import React, { useState, useMemo, useRef, useCallback, useEffect, Fragment } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { LineChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine, ReferenceArea, ReferenceDot, Label } from 'recharts'
-import { RotateCcw, Move, Sparkles } from 'lucide-react'
+import { LineChart, Line, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, ReferenceLine, ReferenceArea, Label, ReferenceDot } from 'recharts'
+import { RotateCcw, Move } from 'lucide-react'
 import type { TextContent, ChartContent, TableContent, StockContent } from './ChatArea'
 import { useBacktestSimulation } from '@/hooks/useBacktestSimulation'
 import { BacktestControls } from './BacktestControls'
@@ -26,9 +26,12 @@ function preprocessMarkdown(text: string): string {
   // 全角归一化
   processed = processed.replace(/＋/g, '+').replace(/－/g, '-')
 
-  // 🚀 直接把 **+3.70%** 变成 <strong>+3.70%</strong>
+  // 处理带正负号的数字加粗，包括复杂格式如 **-0.09元(-0.82%)**
+  // 匹配格式：**+/-数字(单位)(括号内容)**
+  // 例如：**-0.09元(-0.82%)** 或 **+0.52元(+4.73%)** 或 **+3.70%**
+  // 使用更通用的匹配：匹配 ** 之间以 + 或 - 开头的所有内容（直到下一个 **）
   processed = processed.replace(
-    /\*\*\s*([+-]\d+(?:\.\d+)?[%元]?)\s*\*\*/g,
+    /\*\*\s*([+-][^*]+?)\s*\*\*/g,
     '<strong>$1</strong>'
   )
 
@@ -37,27 +40,6 @@ function preprocessMarkdown(text: string): string {
 
 
 
-
-// AlgoSelect Component
-const AlgoSelect: React.FC<{ label: string; value: string; options: { label: string; value: string }[]; onChange: (v: string) => void }> = ({ label, value, options, onChange }) => (
-  <div className="flex items-center gap-2 bg-gray-800/80 px-3 py-1.5 rounded-lg border border-gray-700 shadow-sm transition-colors hover:border-violet-500/50">
-    <span className="text-xs text-gray-400 font-medium whitespace-nowrap">{label}</span>
-    <div className="relative">
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="bg-transparent text-xs text-gray-200 outline-none appearance-none pr-6 cursor-pointer font-medium hover:text-violet-400 transition-colors w-full"
-      >
-        {options.map(opt => <option key={opt.value} value={opt.value} className="bg-gray-800 text-gray-300">{opt.label}</option>)}
-      </select>
-      <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none text-gray-500">
-        <svg width="10" height="6" viewBox="0 0 10 6" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <path d="M1 1L5 5L9 1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-      </div>
-    </div>
-  </div>
-);
 
 export function MessageContent({ content }: MessageContentProps) {
   if (content.type === 'text') {
@@ -107,28 +89,28 @@ export function MessageContent({ content }: MessageContentProps) {
             ),
             // 表格
             table: ({ children }) => (
-              <div className="overflow-x-auto my-3">
-                <table className="w-full border-collapse border border-white/10">
+              <div className="overflow-x-auto my-3 rounded-lg border border-white/10 bg-dark-800/30 shadow-sm">
+                <table className="w-full border-collapse">
                   {children}
                 </table>
               </div>
             ),
             thead: ({ children }) => (
-              <thead className="bg-dark-700/50">{children}</thead>
+              <thead className="bg-gradient-to-r from-dark-700/50 to-dark-800/50 border-b border-white/10">{children}</thead>
             ),
             tbody: ({ children }) => (
               <tbody>{children}</tbody>
             ),
             tr: ({ children }) => (
-              <tr className="border-b border-white/5 hover:bg-dark-600/30 transition-colors">{children}</tr>
+              <tr className="border-b border-white/5 hover:bg-gradient-to-r hover:from-dark-700/30 hover:to-dark-800/30 transition-all duration-150 group">{children}</tr>
             ),
             th: ({ children }) => (
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider border border-white/10">
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
                 {children}
               </th>
             ),
             td: ({ children }) => (
-              <td className="px-4 py-2 text-sm text-gray-300 border border-white/5">
+              <td className="px-4 py-3 text-sm text-gray-300 group-hover:text-gray-200 transition-colors">
                 {children}
               </td>
             ),
@@ -245,41 +227,45 @@ export function MessageContent({ content }: MessageContentProps) {
     }
 
     return (
-      <div className="mt-2 overflow-x-auto max-h-80 overflow-y-auto">
+      <div className="mt-2 overflow-x-auto rounded-lg border border-white/10 bg-dark-800/30">
         {title && (
-          <h4 className="text-sm font-medium text-gray-300 mb-3">{title}</h4>
+          <div className="px-4 pt-3 pb-2 border-b border-white/10">
+            <h4 className="text-sm font-semibold text-gray-200">{title}</h4>
+          </div>
         )}
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="border-b border-white/10">
-              {headers.map((header, index) => (
-                <th
-                  key={index}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
-                >
-                  {header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr
-                key={rowIndex}
-                className="border-b border-white/5 hover:bg-dark-600/30 transition-colors"
-              >
-                {row.map((cell, cellIndex) => (
-                  <td
-                    key={cellIndex}
-                    className="px-4 py-2 text-sm text-gray-300"
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gradient-to-r from-dark-700/50 to-dark-800/50 border-b border-white/10">
+                {headers.map((header, index) => (
+                  <th
+                    key={index}
+                    className="px-4 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider"
                   >
-                    {renderCell(cell, cellIndex)}
-                  </td>
+                    {header}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr
+                  key={rowIndex}
+                  className="border-b border-white/5 hover:bg-gradient-to-r hover:from-dark-700/30 hover:to-dark-800/30 transition-all duration-150 group"
+                >
+                  {row.map((cell, cellIndex) => (
+                    <td
+                      key={cellIndex}
+                      className="px-4 py-3 text-sm text-gray-300 group-hover:text-gray-200 transition-colors"
+                    >
+                      {renderCell(cell, cellIndex)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     )
   }
@@ -293,7 +279,12 @@ export function MessageContent({ content }: MessageContentProps) {
 
 // 交互式图表组件，支持鼠标拖拽平移、滚轮缩放、异常区高亮、新闻侧边栏
 function InteractiveChart({ content }: { content: ChartContent }) {
-  const { title, data, chartType = 'line', sessionId, messageId, originalData, anomalyZones = [], semantic_zones = [], prediction_semantic_zones = [], ticker, anomalies = [], predictionStartDay } = content as any
+  const { title, data, chartType = 'line', sessionId, messageId, originalData, anomalyZones = [], ticker, changePoints = [], semanticZones = [], predictionSemanticZones = [] } = content
+
+  // Aliases for compatibility with existing code
+  const semantic_zones = semanticZones
+  const prediction_semantic_zones = predictionSemanticZones
+  const anomalies = anomalyZones
 
   // 新闻侧边栏状态
   const [newsSidebarOpen, setNewsSidebarOpen] = useState(false)
@@ -304,10 +295,14 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // 异常区悬浮状态
   const [activeZone, setActiveZone] = useState<any>(null)
 
-  // Algorithm Selection State - Default to 'plr'
-  const [trendAlgo, setTrendAlgo] = useState<string>('plr');
-  const [anomalyAlgo, setAnomalyAlgo] = useState<string>('all');
-  const [useSemanticRegimes, setUseSemanticRegimes] = useState(true); // Toggle for new view
+  // 变点悬浮状态
+  const [activeChangePoint, setActiveChangePoint] = useState<any>(null)
+
+  // Trend Algorithm State
+  const [trendAlgo, setTrendAlgo] = useState('semantic')
+  const useSemanticRegimes = trendAlgo === 'semantic'
+
+
 
   // 从URL恢复新闻侧栏状态（仅在ticker可用时）
   useEffect(() => {
@@ -320,7 +315,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     if (savedDate) {
       setSelectedDate(savedDate);
       setNewsSidebarOpen(savedSidebarOpen);
-      // console.log('[MessageContent] Restored from URL - date:', savedDate, 'sidebar:', savedSidebarOpen);
+      console.log('[MessageContent] Restored from URL - date:', savedDate, 'sidebar:', savedSidebarOpen);
     }
   }, [ticker]); // 只在ticker变化时执行
 
@@ -344,39 +339,20 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     fetchNews();
   }, [selectedDate, ticker]);  // 移除newsSidebarOpen依赖，确保刷新后自动加载
 
-  // Debug: Log semantic zones data
-  useEffect(() => {
-    // console.log('[SEMANTIC DATA] semantic_zones:', semantic_zones);
-    // console.log('[SEMANTIC DATA] prediction_semantic_zones:', prediction_semantic_zones);
-    // console.log('[SEMANTIC DATA] anomalyZones:', anomalyZones);
-    // console.log('[SEMANTIC DATA] anomalies:', anomalies);
-
-    if (semantic_zones && semantic_zones.length > 0) {
-      // console.log('[SEMANTIC DATA] First semantic zone:', semantic_zones[0]);
-      // console.log('[SEMANTIC DATA] First zone events:', semantic_zones[0].events);
-    }
-  }, [semantic_zones, prediction_semantic_zones, anomalyZones, anomalies]);
-
   // 图表点击处理
   const handleChartClick = useCallback((e: any) => {
     if (e && e.activeLabel && ticker) {
       const date = e.activeLabel as string;
-
-      // Prevent redundant updates if clicking the same date
-      if (date === selectedDate && newsSidebarOpen) return;
-
       setSelectedDate(date);
       setNewsSidebarOpen(true);
 
       // 持久化到URL
       const params = new URLSearchParams(window.location.search);
-      if (params.get('selectedDate') !== date) {
-        params.set('selectedDate', date);
-        params.set('sidebarOpen', 'true');
-        window.history.replaceState({}, '', `${window.location.pathname}?${params}`);
-      }
+      params.set('selectedDate', date);
+      params.set('sidebarOpen', 'true');
+      window.history.replaceState({}, '', `${window.location.pathname}?${params}`);
     }
-  }, [ticker, selectedDate, newsSidebarOpen]);
+  }, [ticker]);
 
   // 新闻侧栏关闭处理
   const handleCloseSidebar = useCallback(() => {
@@ -430,7 +406,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
           return {
             name: date,
-            历史价格: histPoint?.value ?? null,
+            历史供电量: histPoint?.value ?? null,
             实际值: truthPoint?.value ?? null,
             回测预测: predPoint?.value ?? null
           }
@@ -438,21 +414,21 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     }
 
     // 正常模式
-    return data.labels.map((label: any, index: any) => {
+    return data.labels.map((label, index) => {
       const item: Record<string, string | number | null> = { name: label }
-      data.datasets.forEach((dataset: any) => {
+      data.datasets.forEach((dataset) => {
         item[dataset.label] = dataset.data[index]
       })
       return item
-    }).filter((item: any) => isWeekday(item.name as string))
+    }).filter(item => isWeekday(item.name as string))
   }, [data, backtest.chartData])
 
   // 计算Y轴范围（自适应）- 基于所有数据，保持一致性
   const yAxisDomain = useMemo(() => {
     // 收集所有非null的数值
     const allValues: number[] = []
-    chartData.forEach((item: any) => {
-      data.datasets.forEach((dataset: any) => {
+    chartData.forEach((item) => {
+      data.datasets.forEach((dataset) => {
         const value = item[dataset.label]
         if (value !== null && value !== undefined && typeof value === 'number' && !isNaN(value)) {
           allValues.push(value)
@@ -516,18 +492,18 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // DIAGNOSTIC: Check if zone dates exist in chartData AND their positions
   useEffect(() => {
     if (anomalyZones && anomalyZones.length > 0 && chartData.length > 0) {
-      const chartDates = new Set(chartData.map((d: any) => d.name))
-      // console.log('[DIAGNOSTIC] chartData range:', chartData[0]?.name, 'to', chartData[chartData.length - 1]?.name, `(${chartData.length} points)`)
-      // console.log('[DIAGNOSTIC] viewStartIndex:', viewStartIndex, 'viewEndIndex:', viewEndIndex, 'visible:', viewEndIndex - viewStartIndex + 1, 'points')
+      const chartDates = new Set(chartData.map(d => d.name))
+      console.log('[DIAGNOSTIC] chartData range:', chartData[0]?.name, 'to', chartData[chartData.length - 1]?.name, `(${chartData.length} points)`)
+      console.log('[DIAGNOSTIC] viewStartIndex:', viewStartIndex, 'viewEndIndex:', viewEndIndex, 'visible:', viewEndIndex - viewStartIndex + 1, 'points')
 
-      anomalyZones.forEach((zone: any, idx: any) => {
-        const startIndex = chartData.findIndex((d: any) => d.name === zone.startDate)
-        const endIndex = chartData.findIndex((d: any) => d.name === zone.endDate)
+      anomalyZones.forEach((zone, idx) => {
+        const startIndex = chartData.findIndex(d => d.name === zone.startDate)
+        const endIndex = chartData.findIndex(d => d.name === zone.endDate)
         const isInViewport = startIndex >= viewStartIndex && endIndex <= viewEndIndex
         const hasStart = chartDates.has(zone.startDate)
         const hasEnd = chartDates.has(zone.endDate)
 
-        // console.log(`[DIAGNOSTIC] Zone ${idx} (${zone.startDate}-${zone.endDate}): start=${hasStart}(idx=${startIndex}), end=${hasEnd}(idx=${endIndex}), inViewport=${isInViewport}`)
+        console.log(`[DIAGNOSTIC] Zone ${idx} (${zone.startDate}-${zone.endDate}): start=${hasStart}(idx=${startIndex}), end=${hasEnd}(idx=${endIndex}), inViewport=${isInViewport}`)
       })
     }
   }, [anomalyZones, chartData, viewStartIndex, viewEndIndex])
@@ -551,50 +527,120 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
   // --- Semantic Regimes Logic ---
   const semanticRegimes = useMemo(() => {
+    // --- Helper Functions (Hoisted for reuse) ---
+
+    // 3. CRITICAL: Aggregate raw zones (anomalyZones) into semantic zones as events
+    // This enables the "Event Flow" tooltip to show the timeline of raw zones
+    const aggregateRawZones = (semanticZone: any, isPrediction: boolean) => {
+      if (!anomalyZones || anomalyZones.length === 0) return semanticZone;
+
+      // Find all raw zones that overlap with this semantic zone
+      const overlappingRawZones = anomalyZones.filter((rawZone: any) => {
+        const zoneMethod = rawZone.method || 'plr';
+        // If semantic zone is prediction, ONLY match prediction raw zones
+        if (isPrediction) {
+          return (zoneMethod === 'plr_prediction' || rawZone.is_prediction);
+        }
+        // Otherwise match historical raw zones
+        return (zoneMethod === 'plr' || !rawZone.is_prediction) && rawZone.startDate <= semanticZone.endDate && rawZone.endDate >= semanticZone.startDate;
+      });
+
+      // Convert raw zones to event format for tooltip display
+      const events = overlappingRawZones.map((rawZone: any) => ({
+        startDate: rawZone.startDate,
+        endDate: rawZone.endDate,
+        // FIX: Prioritize event_summary (rich text) over summary (generic text)
+        summary: rawZone.event_summary || rawZone.summary || 'Raw Zone Event',
+        event_summary: rawZone.event_summary || rawZone.summary,
+        avg_return: rawZone.avg_return,
+        startPrice: rawZone.startPrice,
+        endPrice: rawZone.endPrice,
+        type: rawZone.type || rawZone.displayType || 'raw',
+        sentiment: rawZone.sentiment
+      }));
+
+      return {
+        ...semanticZone,
+        events: events.length > 0 ? events : (semanticZone.events || [])
+      };
+    };
+
+    // Merge logic: Merge adjacent zones with same sentiment
+    const mergeSemanticZones = (zones: any[]) => {
+      if (!zones || zones.length === 0) return [];
+      const sorted = [...zones].sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+      const merged: any[] = [];
+      let current = sorted[0];
+
+      for (let i = 1; i < sorted.length; i++) {
+        const next = sorted[i];
+        // FIX: Strict Sign Check and Continuity Check
+        // 1. Check Direction Strictness: Positive must match Positive, Negative matches Negative
+        const returnA = current.avg_return || 0;
+        const returnB = next.avg_return || 0;
+        const sameDirection = (returnA > 0 && returnB > 0) || (returnA < 0 && returnB < 0) || (returnA === 0 && returnB === 0);
+
+        // 2. Continuity Check: Gap <= 5 days
+        const currentEnd = new Date(current.endDate).getTime();
+        const nextStart = new Date(next.startDate).getTime();
+        const diffDays = (nextStart - currentEnd) / (1000 * 60 * 60 * 24);
+        const isContiguous = diffDays <= 5;
+
+        if (sameDirection && isContiguous) {
+          // Validate continuity: if gap is small enough? For now assume strict or close enough
+          // Extend current
+          current = {
+            ...current,
+            endDate: next.endDate,
+            avg_return: (current.avg_return + next.avg_return) / 2, // Approximation, weighted would be better
+            events: [...(current.events || []), ...(next.events || [])]
+          };
+        } else {
+          merged.push(current);
+          current = next;
+        }
+      }
+      merged.push(current);
+      return merged;
+    };
+
     // 1. If Backend already provided Semantic Zones, use them directly!
     // This supports "Event Flow" feature and robust backend merging
     if (semantic_zones.length > 0 || (prediction_semantic_zones && prediction_semantic_zones.length > 0)) {
       // 1. Raw zones
       let historicalZones = semantic_zones.map((z: any) => ({ ...z, isPrediction: false }));
+
+      // CRITICAL FIX: If backend did NOT provide historical semantic_zones (empty), 
+      // but provided prediction zones, we must NOT leave historicalZones empty.
+      // We must generate them from raw 'plr' zones (without merging, or with separate merging).
+      // User said "History regions ... impossible to merge", so we preserve raw distinctness for history if backend is empty.
+      if (historicalZones.length === 0 && anomalyZones && anomalyZones.length > 0) {
+        const rawHistory = anomalyZones.filter((z: any) => (z.method || 'plr') === 'plr' && !z.is_prediction && z.method !== 'plr_prediction');
+        // Convert raw to semantic format (1:1 mapping, no merging to avoid "impossible merge")
+        historicalZones = rawHistory.map((z: any) => ({
+          ...z,
+          isPrediction: false,
+          events: [{
+            startDate: z.startDate,
+            endDate: z.endDate,
+            summary: z.event_summary || z.summary || 'Raw Zone Event',
+            event_summary: z.event_summary || z.summary,
+            avg_return: z.avg_return,
+            startPrice: z.startPrice,
+            endPrice: z.endPrice,
+            type: z.type || z.displayType || 'raw',
+            sentiment: z.sentiment
+          }]
+        }));
+      }
+
       let predictionZones = (prediction_semantic_zones || []).map((z: any) => ({ ...z, isPrediction: true }));
 
-      // 2. Strict Interval Partitioning - REMOVED to avoid hiding valid zones at boundary
-      // Trust the lists provided by backend (semantic_zones vs prediction_semantic_zones)
-
-      // 3. CRITICAL: Aggregate raw zones (anomalyZones) into semantic zones as events
-      // This enables the "Event Flow" tooltip to show the timeline of raw zones
-      const aggregateRawZones = (semanticZone: any) => {
-        if (!anomalyZones || anomalyZones.length === 0) return semanticZone;
-
-        // Find all raw zones that overlap with this semantic zone
-        const overlappingRawZones = anomalyZones.filter((rawZone: any) => {
-          // Use string comparison for dates (YYYY-MM-DD) to avoid timezone issues
-          // A overlaps B if StartA <= EndB AND EndA >= StartB
-          return rawZone.startDate <= semanticZone.endDate && rawZone.endDate >= semanticZone.startDate;
-        });
-
-        // Convert raw zones to event format for tooltip display
-        const events = overlappingRawZones.map((rawZone: any) => ({
-          startDate: rawZone.startDate,
-          endDate: rawZone.endDate,
-          summary: rawZone.summary || rawZone.event_summary || 'Raw Zone Event',
-          event_summary: rawZone.event_summary || rawZone.summary,
-          avg_return: rawZone.avg_return,
-          startPrice: rawZone.startPrice,
-          endPrice: rawZone.endPrice,
-          type: rawZone.type || rawZone.displayType || 'raw',
-          sentiment: rawZone.sentiment
-        }));
-
-        return {
-          ...semanticZone,
-          events: events.length > 0 ? events : (semanticZone.events || [])
-        };
-      };
-
       // Apply aggregation to both historical and prediction zones
-      historicalZones = historicalZones.map(aggregateRawZones);
-      predictionZones = predictionZones.map(aggregateRawZones);
+      historicalZones = historicalZones.map(z => aggregateRawZones(z, false));
+      // predictionZones: First aggregate events, THEN merge adjacent zones to form larger blocks
+      predictionZones = predictionZones.map(z => aggregateRawZones(z, true));
+      predictionZones = mergeSemanticZones(predictionZones);
 
       // Merge history and prediction zones
       return [
@@ -602,19 +648,69 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         ...predictionZones
       ];
     }
+
     // 2. Fallback: Frontend Calculation (for legacy cache or other algos)
     if (!anomalyZones || anomalyZones.length === 0) return [];
     if (chartData.length === 0) return [];
 
-    // 1. Sort zones by date
+    // Filter and Sort zones
     const sortedZones = [...anomalyZones]
       .filter(z => {
         if (trendAlgo === 'all') return true;
-        // Allow 'plr_prediction' when 'plr' is selected
         if (trendAlgo === 'plr' && z.method === 'plr_prediction') return true;
+        // FIX: If mode is 'semantic' and we are in fallback, we operate on ALL 'plr' zones (history + prediction)
+        if (trendAlgo === 'semantic') {
+          return (z.method || 'plr') === 'plr' || z.method === 'plr_prediction';
+        }
         return (z.method || 'plr') === trendAlgo;
       })
       .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
+
+    // FIX: If in Semantic Mode Fallback, we MUST convert raw zones to Event format and MERGE them!
+    // AND we must STRICTLY separate History and Prediction to avoid merging them together!
+    if (trendAlgo === 'semantic') {
+      // 1. Separate History and Prediction from available raw zones
+      const rawHistory = sortedZones.filter(z => (z.method || 'plr') === 'plr' && !z.is_prediction && z.method !== 'plr_prediction');
+      const rawPrediction = sortedZones.filter(z => z.method === 'plr_prediction' || z.is_prediction);
+
+      // 2. Convert and Merge History
+      const semanticHistory = mergeSemanticZones(rawHistory.map(z => ({
+        ...z,
+        isPrediction: false,
+        events: [{
+          startDate: z.startDate,
+          endDate: z.endDate,
+          summary: z.event_summary || z.summary || 'Raw Zone Event',
+          event_summary: z.event_summary || z.summary,
+          avg_return: z.avg_return,
+          startPrice: z.startPrice,
+          endPrice: z.endPrice,
+          type: z.type || z.displayType || 'raw',
+          sentiment: z.sentiment
+        }]
+      })));
+
+      // 3. Convert and Merge Prediction
+      const semanticPrediction = mergeSemanticZones(rawPrediction.map(z => ({
+        ...z,
+        isPrediction: true,
+        events: [{
+          startDate: z.startDate,
+          endDate: z.endDate,
+          summary: z.event_summary || z.summary || 'Raw Zone Event',
+          event_summary: z.event_summary || z.summary,
+          avg_return: z.avg_return,
+          startPrice: z.startPrice,
+          endPrice: z.endPrice,
+          type: z.type || z.displayType || 'raw',
+          sentiment: z.sentiment
+        }]
+      })));
+
+      return [...semanticHistory, ...semanticPrediction];
+    }
+
+    return sortedZones;
 
     if (sortedZones.length === 0) return [];
 
@@ -769,7 +865,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         endPrice
       };
     });
-  }, [anomalyZones, chartData, trendAlgo, anomalies, data.datasets, semantic_zones, prediction_semantic_zones, predictionStartDay]);
+  }, [anomalyZones, chartData, trendAlgo, anomalies, data.datasets, semantic_zones, prediction_semantic_zones]);
 
   // --- End Semantic Regimes ---
 
@@ -1146,16 +1242,16 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // @ts-ignore
   const visibleAnomalies = useMemo(() => {
     return (anomalies || []).filter((a: any) => {
-      if (anomalyAlgo === 'all') return true;
-      return (a.method || 'bcpd') === anomalyAlgo;
+      if (trendAlgo === 'all') return true;
+      return (a.method || 'bcpd') === trendAlgo;
     });
-  }, [anomalies, anomalyAlgo]);
+  }, [anomalies, trendAlgo]);
 
   // 如果标题包含"预测"，则不显示（因为外层已有"价格走势分析"标题）
   const shouldShowTitle = title && !title.includes('预测')
 
   return (
-    <div className="mt-2">
+    <div className="mt-2 relative">
       {/* 回测控制UI */}
       {hasBacktestSupport && (
         <BacktestControls
@@ -1169,24 +1265,26 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           {shouldShowTitle && (
             <h4 className="text-sm font-medium text-gray-300">{title}</h4>
           )}
-          {/* Semantic Toggle Button - Always show if we have zones */}
-          {(semantic_zones.length > 0 || anomalyZones.length > 0) && (
-            <button
-              onClick={() => setUseSemanticRegimes(!useSemanticRegimes)}
-              className={`flex items-center justify-center w-8 h-8 rounded-lg transition-colors border ${useSemanticRegimes
-                ? 'bg-purple-500/20 text-purple-400 border-purple-500/30'
-                : 'text-gray-400 border-white/5 hover:bg-white/5'
-                }`}
-              title="切换语义化行情视角"
-            >
-              <Sparkles className="w-4 h-4" />
-            </button>
+          {/* Trend Algo Selector for Chart */}
+          {anomalyZones && anomalyZones.length > 0 && (
+            <div className="flex items-center bg-dark-600/50 rounded p-0.5 border border-gray-700/50">
+              <button
+                onClick={() => setTrendAlgo('plr')}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-all ${trendAlgo === 'plr' ? 'bg-violet-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                Raw
+              </button>
+              <button
+                onClick={() => setTrendAlgo('semantic')}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-all ${trendAlgo === 'semantic' ? 'bg-violet-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                Semantic
+              </button>
+            </div>
           )}
         </div>
-
         <div className="flex items-center gap-2">
-          {/* Help Text / Controls */}
-          {isZoomed ? (
+          {isZoomed && (
             <>
               <button
                 onClick={handleReset}
@@ -1196,12 +1294,13 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                 <RotateCcw className="w-3.5 h-3.5" />
                 <span>重置</span>
               </button>
-              <div className="flex items-center gap-1 text-xs text-gray-500 ml-2">
+              <div className="flex items-center gap-1 text-xs text-gray-500">
                 <Move className="w-3.5 h-3.5" />
                 <span>拖拽平移 | 滚轮缩放</span>
               </div>
             </>
-          ) : (
+          )}
+          {!isZoomed && (
             <div className="flex items-center gap-1 text-xs text-gray-500">
               <Move className="w-3.5 h-3.5" />
               <span>点击图表后：拖拽平移 | 滚轮缩放</span>
@@ -1209,7 +1308,95 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           )}
         </div>
       </div>
+      {/* Zone计数器 - debug */}
+      {anomalyZones && anomalyZones.length > 0 && (
+        <div className="absolute top-2 right-2 bg-black/70 px-2 py-1 rounded text-xs text-white/70 z-10">
+          {anomalyZones.length} 个重点区域
+        </div>
+      )}
+      {/* Zone Detail Tooltip (Overlay) */}
+      {activeZone && (
+        <div
+          className="absolute top-10 left-1/2 transform -translate-x-1/2 bg-black/90 border border-gray-700/50 p-4 rounded-lg shadow-2xl z-30 backdrop-blur-md w-[400px] pointer-events-none"
+          style={{ pointerEvents: 'none' }} // Explicit inline style to prevent flickering
+        >
+          {/* Header: Badge + Date Range */}
+          <div className="flex items-center gap-3 mb-4">
+            <div className={`px-2 py-0.5 rounded text-sm font-bold ${(activeZone.avg_return || activeZone.change_pct || 0) >= 0
+              ? 'bg-red-500/20 text-red-500'
+              : 'bg-emerald-500/20 text-emerald-500'
+              }`}>
+              {(activeZone.avg_return || activeZone.change_pct || 0) > 0 ? '+' : ''}{((activeZone.avg_return || activeZone.change_pct || 0) * 100).toFixed(1)}%
+            </div>
+            <div className="text-gray-400 text-xs font-mono">
+              {activeZone.startDate} ~ {activeZone.endDate}
+            </div>
+          </div>
 
+          {/* Event Flow Section */}
+          <div className="flex items-center gap-2 mb-3">
+            <div className="w-1.5 h-1.5 rounded-full bg-violet-500"></div>
+            <span className="text-[10px] uppercase font-bold text-violet-400 tracking-wider">EVENT FLOW</span>
+          </div>
+
+          {/* Timeline List */}
+          <div className="relative pl-2">
+            {/* Vertical Line */}
+            <div className="absolute left-[3px] top-1 bottom-1 w-[1px] bg-gray-800"></div>
+
+            {/* Events */}
+            <div className="space-y-4">
+              {(activeZone.events && activeZone.events.length > 0 ? activeZone.events : [activeZone]).map((ev: any, i: number) => {
+                const evReturn = ev.avg_return || 0; // Or parse from summary if available?
+                const isPos = evReturn >= 0;
+
+                return (
+                  <div key={i} className="relative pl-4">
+                    {/* Dot */}
+                    <div className={`absolute left-0 top-1.5 w-1.5 h-1.5 rounded-full border border-black z-10 ${activeZone.sentiment === 'positive' ? 'bg-red-400' : (activeZone.sentiment === 'negative' ? 'bg-emerald-400' : 'bg-gray-400')
+                      }`}></div>
+
+                    {/* Content */}
+                    <div>
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-[10px] text-gray-500 font-mono">{ev.date || ev.startDate}</span>
+                        {Math.abs(evReturn) > 0.001 && (
+                          <span className={`text-[10px] px-1 rounded ${isPos ? 'bg-red-900/30 text-red-400' : 'bg-emerald-900/30 text-emerald-400'}`}>
+                            {isPos ? '+' : ''}{(evReturn * 100).toFixed(1)}%
+                          </span>
+                        )}
+                      </div>
+                      <div className="text-xs text-gray-300 leading-snug">
+                        {ev.summary || ev.event_summary || ev.reason}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      )
+      }
+
+      {/* 变点详情提示 */}
+      {
+        activeChangePoint && (
+          <div className="absolute top-10 right-2 bg-gray-900/90 border border-amber-500/30 p-2 rounded shadow-lg max-w-xs z-20 backdrop-blur-sm pointer-events-none">
+            <div className="text-amber-400 text-xs font-bold mb-1 flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+              突变点分析 ({activeChangePoint.date})
+            </div>
+            <div className="text-gray-200 text-xs leading-relaxed">
+              {activeChangePoint.reason}
+            </div>
+            <div className="mt-1 text-gray-500 text-[10px] flex justify-between gap-4">
+              <span>幅度: {activeChangePoint.magnitude ? Number(activeChangePoint.magnitude).toFixed(2) : '-'}</span>
+              <span>类型: {activeChangePoint.type === 'shift' ? '水平偏移' : '趋势变化'}</span>
+            </div>
+          </div>
+        )
+      }
       <div
         ref={chartContainerRef}
         className="w-full h-[512px] relative"
@@ -1238,6 +1425,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               style={{ fontSize: '12px' }}
               domain={yAxisDomain}
               allowDataOverflow={false}
+              label={{ value: '供电量(MW)', angle: -90, position: 'insideLeft' }}
               tickFormatter={(value) => {
                 // 格式化 Y 轴刻度标签，处理大数值
                 if (isNaN(value) || !isFinite(value)) {
@@ -1259,7 +1447,14 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               }}
               width={60}
             />
-            <Tooltip content={<CustomTooltip />} cursor={{ stroke: '#60a5fa', strokeWidth: 1, strokeDasharray: '3 3' }} />
+            <Tooltip
+              contentStyle={{
+                backgroundColor: '#1a1a24',
+                border: '1px solid rgba(255, 255, 255, 0.1)',
+                borderRadius: '8px',
+              }}
+              labelStyle={{ color: '#9ca3af' }}
+            />
             <Legend
               wrapperStyle={{ fontSize: '12px' }}
             />
@@ -1282,28 +1477,35 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
               // Prediction Styling - User wants "Semantic Version" (solid block), not dashed "Raw" look
               const isPrediction = regime.is_prediction;
-              // Opacity: History=0.3, Prediction=0.2 (slightly lighter but distinctive)
-              const baseOpacity = isPrediction ? 0.2 : (isSideways ? 0.2 : 0.3);
+              // Opacity: History=0.15 (Fainted as requested), Prediction=0.15 (Consistent)
+              // User Request: "Too intense! Lower slightly" -> Reduced from 0.3 to 0.15
+              const baseOpacity = 0.15; // Unified opacity (Fainted)
 
               const uniqueKey = `regime-area-${regime.startDate}-${idx}`;
 
               // FIX: Find closest valid dates in chartData to prevent gaps (e.g. if zone starts on Sat)
               const findClosestDate = (targetDate: string) => {
                 if (chartData.find((d: any) => d.name === targetDate)) return targetDate;
-                // If not found, find closest index? simpler: just use valid data boundaries if completely out?
-                // Simple fallback: If zone is within range, find nearest.
-                // For now, let's just assume Recharts handles Strings better if they exist.
-                // If they DON'T exist, we must snap.
+
                 // Sorted chart dates:
                 const chartDates = chartData.map((d: any) => d.name).sort();
+                if (chartDates.length === 0) return targetDate;
+
                 if (targetDate < chartDates[0]) return chartDates[0];
                 if (targetDate > chartDates[chartDates.length - 1]) return chartDates[chartDates.length - 1];
+
                 // Find nearest
-                // This is expensive O(N) inside render loop. Optimization: pre-calculate chartDates map?
-                // But for < few hundred points it is fine.
-                return chartData.reduce((prev: any, curr: any) => {
-                  return (Math.abs(new Date(curr.name).getTime() - new Date(targetDate).getTime()) < Math.abs(new Date(prev.name).getTime() - new Date(targetDate).getTime()) ? curr : prev);
-                }).name || targetDate;
+                let closest = chartDates[0];
+                let minDiff = Math.abs(new Date(targetDate).getTime() - new Date(closest).getTime());
+
+                for (let i = 1; i < chartDates.length; i++) {
+                  const diff = Math.abs(new Date(targetDate).getTime() - new Date(chartDates[i]).getTime());
+                  if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = chartDates[i];
+                  }
+                }
+                return closest;
               };
 
               const validStart = findClosestDate(regime.startDate);
@@ -1369,9 +1571,11 @@ function InteractiveChart({ content }: { content: ChartContent }) {
             {!useSemanticRegimes && visibleZones.map((zone: any, idx: number) => {
               // A股配色：红涨绿跌
               const isPositive = (zone.avg_return || 0) >= 0
+              const isRaw = trendAlgo === 'plr'
               const zoneColor = isPositive
-                ? { fill: 'rgba(239, 68, 68, 0.04)', stroke: '#ef4444' }  // 红色=上涨
-                : { fill: 'rgba(34, 197, 94, 0.04)', stroke: '#22c55e' }   // 绿色=下跌
+                // User Request: Raw zones should be "transparent color" (fill='transparent')
+                ? { fill: isRaw ? 'transparent' : 'rgba(239, 68, 68, 0.15)', stroke: '#ef4444' }  // 红色=上涨
+                : { fill: isRaw ? 'transparent' : 'rgba(34, 197, 94, 0.15)', stroke: '#22c55e' }   // 绿色=下跌
 
               const impact = zone.impact || 0.5
               const isCalm = zone.zone_type === 'calm'
@@ -1379,75 +1583,87 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               // 使用唯一key：startDate-endDate组合
               const uniqueKey = `zone-${zone.startDate}-${zone.endDate}-${idx}`
 
-              // FIX: Snap dates
-              const findClosestDate = (targetDate: string) => {
-                if (chartData.length === 0) return targetDate;
-                const first = chartData[0].name;
-                const last = chartData[chartData.length - 1].name;
-                if (targetDate < first) return first;
-                if (targetDate > last) return last;
+              // FIX: 单日zones需要扩展宽度，否则ReferenceArea不显示
+              // FIX: Use findClosestDate logic to prevent gaps in raw zones too
+              const findClosestDateRaw = (targetDate: string) => {
+                const chartDates = chartData.map((d: any) => d.name).sort();
                 if (chartData.find((d: any) => d.name === targetDate)) return targetDate;
-
-                // Simple nearest search
-                let minDiff = Infinity;
-                let closest = targetDate;
-                for (const pt of chartData) {
-                  const diff = Math.abs(new Date(pt.name).getTime() - new Date(targetDate).getTime());
+                if (chartDates.length === 0) return targetDate;
+                if (targetDate < chartDates[0]) return chartDates[0];
+                if (targetDate > chartDates[chartDates.length - 1]) return chartDates[chartDates.length - 1];
+                let closest = chartDates[0];
+                let minDiff = Math.abs(new Date(targetDate).getTime() - new Date(closest).getTime());
+                for (let i = 1; i < chartDates.length; i++) {
+                  const diff = Math.abs(new Date(targetDate).getTime() - new Date(chartDates[i]).getTime());
                   if (diff < minDiff) {
                     minDiff = diff;
-                    closest = pt.name;
+                    closest = chartDates[i];
                   }
                 }
                 return closest;
               };
 
-              const displayStartDate = findClosestDate(zone.startDate);
-              const displayEndDate = findClosestDate(zone.endDate);
+              let displayStartDate = findClosestDateRaw(zone.startDate);
+              let displayEndDate = findClosestDateRaw(zone.endDate);
+
+              if (displayStartDate === displayEndDate) {
+                const startIdx = chartData.findIndex((d: any) => d.name === displayStartDate)
+                if (startIdx > 0) {
+                  displayStartDate = chartData[startIdx - 1].name
+                }
+              }
+
 
               // Prediction Logic
               const isPrediction = zone.is_prediction || zone.zone_type === 'prediction_regime';
 
               // Styling Logic
+              // If it's prediction, use fill even in raw mode (User request: "Prediction area only has semantic intervals... canceling, only historical points are covered")
+              // Actually, user wants prediction area to exist.
+              // So for prediction zones, we ALWAYS use fill (maybe lighter) and dashed stroke
+
               let fill = zoneColor.fill;
               let stroke = zoneColor.stroke;
               let fillOpacity = impact * 0.8;
               let strokeDasharray = isCalm ? '5 5' : undefined;
-              let strokeOpacity = impact;
-              let strokeWidth = 1;
 
-              // FIX: Prediction zones in RAW view should ALSO be displayed, maybe distinct style?
               if (isPrediction) {
-                strokeDasharray = '3 3'; // Distinctive for prediction
-                strokeWidth = 2;
-              } else {
-                // Standard raw zone style
-                // fill = 'none'; // Keep fill? User said "raw still has missing interval", maybe because fill was none?
-                // Let's keep fill to ensure visibility
-                strokeOpacity = 1;
-                strokeWidth = 2; // Thicker stroke for visibility
+                // User request: "Cancel (Raw Mode), then only historical points be covered by raw intervals"
+                // So we do NOT show prediction zones in Raw Mode.
+                return null;
               }
+
+              // Normal Raw styling (no fill but capture events)
+              fill = 'transparent';
 
               return (
                 <ReferenceArea
                   key={uniqueKey}
                   x1={displayStartDate}
                   x2={displayEndDate}
-                  fill={fill}
+                  fill={fill} // transparent fill for events
                   fillOpacity={fillOpacity}
                   stroke={stroke}
-                  strokeOpacity={strokeOpacity}
-                  strokeWidth={strokeWidth}
+                  strokeOpacity={impact}
                   strokeDasharray={strokeDasharray}
-                  onMouseEnter={() => setActiveZone(zone)}
+                  onMouseEnter={() => {
+                    console.log('Hover Raw Zone:', zone)
+                    // Construct a rich object for the tooltip
+                    // Ensure event_summary is prioritized
+                    setActiveZone({
+                      ...zone,
+                      // If raw zone, we want the event_summary as the main description
+                      summary: zone.event_summary || zone.summary || 'No details available',
+                      // Clear events if it's a raw zone (since it IS the event)
+                      events: []
+                    })
+                  }}
                   onMouseLeave={() => setActiveZone(null)}
-                  onClick={(e) => { e.stopPropagation(); setActiveZone(zone); }}
                   className="cursor-pointer transition-all duration-300"
                 />
               )
-
             })}
-
-
+            {/* 变点检测标记 */}
 
             {/* 鼠标跟随的水平参考线 */}
             {mouseY !== null && plotAreaBounds && (() => {
@@ -1479,7 +1695,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               if (!splitDate) return null
 
               // 检查分割日期是否在当前显示的数据中
-              const splitDataPoint = displayData.find((item: any) => item.name === splitDate)
+              const splitDataPoint = displayData.find(item => item.name === splitDate)
               if (splitDataPoint) {
                 return (
                   <ReferenceLine
@@ -1497,13 +1713,14 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               <>
                 <Line
                   type="monotone"
-                  dataKey="历史价格"
+                  dataKey="历史供电量"
                   stroke="#a855f7"
                   strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 6, fill: '#818cf8', stroke: '#312e81', strokeWidth: 2 }}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
+                  connectNulls={false}
                   isAnimationActive={false}
-                  name="历史价格"
+                  name="历史供电量(MW)"
                 />
                 <Line
                   type="monotone"
@@ -1515,7 +1732,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   activeDot={{ r: 4 }}
                   connectNulls={false}
                   isAnimationActive={false}
-                  name="实际值 (Ground Truth)"
+                  name="实际供电量(MW)"
                 />
                 <Line
                   type="monotone"
@@ -1526,22 +1743,22 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   activeDot={{ r: 5 }}
                   connectNulls={false}
                   isAnimationActive={false}
-                  name="回测预测"
+                  name="回测预测(MW)"
                 />
               </>
             ) : (
               /* 正常模式：原有数据集 */
-              data.datasets.map((dataset: any, index: any) => (
+              data.datasets.map((dataset, index) => (
                 <Line
                   key={dataset.label}
                   type="monotone"
                   dataKey={dataset.label}
-                  stroke={dataset.color}
+                  stroke={dataset.color || colors[index % colors.length]}
                   strokeWidth={2}
-                  dot={false}
-                  activeDot={{ r: 6, strokeWidth: 2 }}
-                  isAnimationActive={false}
+                  dot={{ r: 3 }}
+                  activeDot={{ r: 5 }}
                   connectNulls={false}
+                  isAnimationActive={false}
                 />
               ))
             )}
@@ -1572,9 +1789,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
             {/* 异常点调试日志 (控制台可见) */}
             {(() => {
-              // console.log("[MessageContent] Anomalies Prop:", anomalies?.length || 0);
-              // console.log("[MessageContent] Visible Anomalies:", visibleAnomalies.length);
-              // console.log("[MessageContent] Prediction Zones:", prediction_semantic_zones?.length || 0);
+              console.log("[MessageContent] Anomalies Prop:", anomalies?.length || 0);
+              console.log("[MessageContent] Visible Anomalies:", visibleAnomalies.length);
+              console.log("[MessageContent] Prediction Zones:", prediction_semantic_zones?.length || 0);
               if (anomalies && anomalies.length > 0 && visibleAnomalies.length === 0) {
                 console.warn("[MessageContent] WARNING: Anomalies exist but none are visible! Check date format match.",
                   "Anomaly Sample:", anomalies[0],
@@ -1680,32 +1897,32 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         </ResponsiveContainer>
 
         {/* X 轴滑块 - 明显的滑块圆点 */}
-        {((hasBacktestSupport && originalData && originalData.length > 60) || (data.datasets.some((d: any) => d.label === '历史价格') && data.datasets.some((d: any) => d.label === '预测价格'))) && plotAreaBounds && (() => {
-          // 计算分割点：拖拽时使用临时日期，否则使用回测分割点或历史价格和预测价格的分界点
+        {((hasBacktestSupport && originalData && originalData.length > 60) || (data.datasets.some(d => d.label === '历史供电量') && data.datasets.some(d => d.label === '预测供电量'))) && plotAreaBounds && (() => {
+          // 计算分割点：拖拽时使用临时日期，否则使用回测分割点或历史供电量和预测供电量的分界点
           let splitDate = isDraggingSlider && tempSplitDate ? tempSplitDate : backtest.splitDate
           let splitIndexInChart = -1
 
           if (splitDate) {
             // 回测模式：使用指定的分割点
-            splitIndexInChart = chartData.findIndex((item: any) => item.name === splitDate)
+            splitIndexInChart = chartData.findIndex(item => item.name === splitDate)
           } else {
-            // 正常模式：查找历史价格和预测价格的分界点
-            // 找到最后一个有历史价格值的点，下一个点就是预测价格的起点
+            // 正常模式：查找历史供电量和预测供电量的分界点
+            // 找到最后一个有历史供电量值的点，下一个点就是预测供电量的起点
             for (let i = chartData.length - 1; i >= 0; i--) {
               const item = chartData[i]
-              const historicalPrice = (item as any)['历史价格']
-              if (historicalPrice !== null && historicalPrice !== undefined) {
-                // 找到下一个有预测价格的点作为分界点
+              const historicalPower = (item as any)['历史供电量']
+              if (historicalPower !== null && historicalPower !== undefined) {
+                // 找到下一个有预测供电量的点作为分界点
                 if (i + 1 < chartData.length) {
                   const nextItem = chartData[i + 1]
-                  const predictedPrice = (nextItem as any)['预测价格']
-                  if (predictedPrice !== null && predictedPrice !== undefined) {
+                  const predictedPower = (nextItem as any)['预测供电量']
+                  if (predictedPower !== null && predictedPower !== undefined) {
                     splitIndexInChart = i + 1
                     splitDate = nextItem.name as string
                     break
                   }
                 }
-                // 如果没有找到预测价格，使用当前点
+                // 如果没有找到预测供电量，使用当前点
                 if (splitIndexInChart < 0) {
                   splitIndexInChart = i
                   splitDate = item.name as string
@@ -1723,7 +1940,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           // 计算位置比例（相对于当前显示的 displayData）
           // 需要找到分割日期在 displayData 中的索引，而不是在 chartData 中的索引
           let positionRatio = 0
-          const splitIndexInDisplayData = displayData.findIndex((item: any) => item.name === splitDate)
+          const splitIndexInDisplayData = displayData.findIndex(item => item.name === splitDate)
 
           if (splitIndexInDisplayData >= 0) {
             // 在显示数据中找到，计算位置比例
@@ -1805,7 +2022,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                       if (targetIndex >= 0 && targetIndex < chartData.length && originalData) {
                         const targetDate = chartData[targetIndex].name
                         if (typeof targetDate === 'string') {
-                          const originalIndex = originalData.findIndex((p: any) => p.date === targetDate)
+                          const originalIndex = originalData.findIndex(p => p.date === targetDate)
                           if (originalIndex >= 60 && originalIndex < originalData.length) {
                             if (isFinal) {
                               // 释放鼠标时才触发回测更新
@@ -1835,11 +2052,11 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                     updateSplitPoint(e.clientX, false)
 
                     // 绑定全局事件以支持拖拽
+                    window.addEventListener('mousemove', handleMouseMove)
+                    window.addEventListener('mouseup', handleMouseUp)
                   }}
                 >
                   {/* 滑块圆点 - 大而明显 */}
-                  {/* Main Chart Area */}
-
                   <div className="w-full h-full bg-orange-400 rounded-full shadow-xl shadow-orange-400/50 border-2 border-orange-300 cursor-grab active:cursor-grabbing hover:scale-125 hover:shadow-orange-400/70 transition-all duration-200 flex items-center justify-center">
                     {/* 内部白点 */}
                     <div className="w-2 h-2 bg-white/90 rounded-full" />
@@ -1890,7 +2107,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                     if (targetIndex >= 0 && targetIndex < chartData.length && originalData) {
                       const targetDate = chartData[targetIndex].name
                       if (typeof targetDate === 'string') {
-                        const originalIndex = originalData.findIndex((p: any) => p.date === targetDate)
+                        const originalIndex = originalData.findIndex(p => p.date === targetDate)
                         if (originalIndex >= 60 && originalIndex < originalData.length) {
                           if (isFinal) {
                             // 释放鼠标时才触发回测更新
@@ -1932,12 +2149,14 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         })()}
       </div>
 
-      {isZoomed && (
-        <div className="mt-2 text-xs text-gray-500 text-center">
-          当前视图：{chartData[viewStartIndex]?.name} 至 {chartData[viewEndIndex]?.name}
-          ({viewEndIndex - viewStartIndex + 1} / {chartData.length} 个数据点)
-        </div>
-      )}
+      {
+        isZoomed && (
+          <div className="mt-2 text-xs text-gray-500 text-center">
+            当前视图：{chartData[viewStartIndex]?.name} 至 {chartData[viewEndIndex]?.name}
+            ({viewEndIndex - viewStartIndex + 1} / {chartData.length} 个数据点)
+          </div>
+        )
+      }
 
 
       {/* 新闻侧边栏 */}
@@ -1953,7 +2172,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           />
         )
       }
-    </div>
+    </div >
   )
 }
 
