@@ -7,20 +7,20 @@ SeasonalNaive 基线预测模型
 - 否则退化为 y[-1]（最后值）
 """
 
-from datetime import timedelta
 import pandas as pd
 import numpy as np
 from .base import BaseForecaster
+from app.utils.trading_calendar import get_next_trading_days
 from app.schemas.session_schema import ForecastResult, ForecastMetrics, TimeSeriesPoint
 
 
 class SeasonalNaiveForecaster(BaseForecaster):
     """季节性朴素预测器（基线模型）"""
 
-    def __init__(self, seasonality: int = 7):
+    def __init__(self, seasonality: int = 5):
         """
         Args:
-            seasonality: 季节性周期，默认 7（一周）
+            seasonality: 季节性周期，默认 5（一周交易日）
         """
         self.seasonality = seasonality
 
@@ -41,12 +41,14 @@ class SeasonalNaiveForecaster(BaseForecaster):
         values = df["y"].values
         last_date = df["ds"].iloc[-1]
 
+        # 获取未来交易日
+        trading_days = get_next_trading_days(last_date, horizon)
+
         # 判断是否使用季节性预测
         use_seasonal = len(df) >= self.seasonality
 
         forecast_points = []
-        for i in range(horizon):
-            future_date = last_date + timedelta(days=i + 1)
+        for i, future_date in enumerate(trading_days):
             if use_seasonal:
                 # 季节性预测：y[t] = y[t - seasonality]
                 if i < self.seasonality:

@@ -251,7 +251,7 @@ DEEPSEEK_API_KEY=your_api_key_here
 
 # Redis
 REDIS_HOST=localhost
-REDIS_PORT=6380
+REDIS_PORT=6379
 REDIS_DB=0
 
 # Server

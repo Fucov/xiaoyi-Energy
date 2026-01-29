@@ -35,7 +35,7 @@ export function BacktestControls({
                 )}
                 {mae !== null && (
                     <div className="text-xs text-gray-400">
-                        预测误差 (MAPE): <span className="text-purple-400 font-mono font-bold">{mae.toFixed(2)}%</span>
+                        预测误差 (MAE): <span className="text-purple-400 font-mono font-bold">{mae.toFixed(4)}</span>
                     </div>
                 )}
             </div>
