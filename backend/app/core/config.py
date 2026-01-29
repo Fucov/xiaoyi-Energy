@@ -12,7 +12,7 @@ class Settings:
 
     # API Keys
     DEEPSEEK_API_KEY: str = os.getenv("DEEPSEEK_API_KEY", "")
-    TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+    BOCHA_API_KEY: str = os.getenv("BOCHA_API_KEY", "")
     
     # Server settings
     HOST: str = os.getenv("HOST", "0.0.0.0")
@@ -40,10 +40,10 @@ class Settings:
         return self.DEEPSEEK_API_KEY
 
     @property
-    def tavily_api_key(self) -> str:
-        """Get Tavily API key, raise error if not set"""
-        if not self.TAVILY_API_KEY:
-            raise ValueError("TAVILY_API_KEY not set in environment variables")
-        return self.TAVILY_API_KEY
+    def bocha_api_key(self) -> str:
+        """Get Bocha API key, raise error if not set"""
+        if not self.BOCHA_API_KEY:
+            raise ValueError("BOCHA_API_KEY not set in environment variables")
+        return self.BOCHA_API_KEY
 
 settings = Settings()

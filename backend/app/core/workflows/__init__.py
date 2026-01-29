@@ -11,13 +11,11 @@ from .data_fetch import fetch_power_data, fetch_rag_reports
 
 # 新闻获取
 from .news import (
-    fetch_tavily_news,
     fetch_news_all,
     search_web,
     fetch_domain_news,
     search_news_around_date,
 )
-# fetch_akshare_news 已移除，不再需要
 
 # 分析
 from .analysis import recommend_forecast_params
@@ -35,7 +33,6 @@ __all__ = [
     "fetch_power_data",
     "fetch_rag_reports",
     # news.py
-    "fetch_tavily_news",
     "fetch_news_all",
     "search_web",
     "fetch_domain_news",
