@@ -79,7 +79,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
 
   // 默认选择第一个有效因子
   const [selectedFactor, setSelectedFactor] = useState<string | null>(null)
-  
+
   // 当validFactors变化时，设置默认选中的因子
   useEffect(() => {
     if (!selectedFactor && validFactors.length > 0) {
@@ -91,26 +91,26 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
 
   // 准备相关性仪表盘数据（按得分降序）
   const dashboardData = ranking
-    .filter(item => {
+    .filter((item: any) => {
       const score = item.influence_score
       return score !== null && score !== undefined && !isNaN(score) && isFinite(score)
     })
-    .map(item => ({
+    .map((item: any) => ({
       name: item.factor_name_cn || item.factor,
       factor: item.factor,
       influence_score: item.influence_score,
       correlation: item.correlation || 0,
       color: FACTOR_COLORS[item.factor] || { main: '#9ca3af', light: '#d1d5db', gradient: '' }
     }))
-    .sort((a, b) => b.influence_score - a.influence_score)
+    .sort((a: any, b: any) => b.influence_score - a.influence_score)
 
   // 准备当前选中因子的散点图数据
   const currentScatterData = selectedFactor && factors[selectedFactor]
-    ? factors[selectedFactor].data.map(point => ({
-        x: point.factor_value,
-        y: point.power,
-        date: point.date
-      }))
+    ? factors[selectedFactor].data.map((point: any) => ({
+      x: point.factor_value,
+      y: point.power,
+      date: point.date
+    }))
     : []
 
   const currentFactor = selectedFactor ? factors[selectedFactor] : null
@@ -160,7 +160,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
               </div>
             </div>
           </div>
-          
+
           <div className="w-full">
             <ResponsiveContainer width="100%" height={250}>
               <BarChart
@@ -169,140 +169,137 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                 margin={{ top: 10, right: 20, left: 20, bottom: 10 }}
                 barCategoryGap="15%"
               >
-              <defs>
-                {dashboardData.map((entry, index) => (
-                  <GradientBar key={entry.factor} entry={entry} index={index} />
-                ))}
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-              <XAxis 
-                type="number"
-                domain={[0, 1]}
-                stroke="#6b7280"
-                tick={{ fill: '#9ca3af', fontSize: 12 }}
-                tickLine={{ stroke: '#4b5563' }}
-                label={{ value: '相关性得分', position: 'insideBottom', offset: -5, fill: '#9ca3af', fontSize: 13 }}
-                tickMargin={8}
-              />
-              <YAxis 
-                type="category"
-                dataKey="name"
-                stroke="#6b7280"
-                tick={{ fill: '#d1d5db', fontSize: 12, fontWeight: 500 }}
-                tickLine={{ stroke: '#4b5563' }}
-                width={75}
-              />
-              <Tooltip
-                contentStyle={{
-                  backgroundColor: 'rgba(17, 24, 39, 0.98)',
-                  border: '1px solid rgba(139, 92, 246, 0.3)',
-                  borderRadius: '8px',
-                  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
-                  padding: '12px',
-                  color: '#e5e7eb'
-                }}
-                wrapperStyle={{
-                  outline: 'none',
-                  border: 'none',
-                  boxShadow: 'none',
-                  backgroundColor: 'transparent',
-                  background: 'transparent'
-                }}
-                itemStyle={{
-                  padding: '0',
-                  margin: '0',
-                  backgroundColor: 'transparent',
-                  background: 'transparent'
-                }}
-                labelStyle={{
-                  display: 'none',
-                  backgroundColor: 'transparent',
-                  background: 'transparent'
-                }}
-                cursor={{ fill: 'transparent' }}
-                formatter={(value: number, name: string, props: any) => {
-                  if (name === 'influence_score') {
-                    const corr = props.payload.correlation || 0
-                    const corrIcon = corr > 0 ? '↑' : corr < 0 ? '↓' : '—'
-                    const corrColor = corr > 0 ? '#60a5fa' : corr < 0 ? '#f87171' : '#9ca3af'
-                    return [
-                      <div key="tooltip" className="space-y-1.5">
-                        <div className="text-gray-200 font-semibold text-sm">{props.payload.name}</div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-cyan-400 font-medium">相关性得分:</span>
-                          <span className="text-white font-bold">{value.toFixed(3)}</span>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="text-gray-400">相关系数:</span>
-                          <span style={{ color: corrColor }} className="font-semibold">
-                            {corrIcon} {Math.abs(corr).toFixed(3)}
-                          </span>
-                        </div>
-                      </div>,
-                      ''
-                    ]
-                  }
-                  return [value.toFixed(3), name]
-                }}
-                labelFormatter={() => ''}
-              />
-              <Bar 
-                dataKey="influence_score" 
-                radius={[0, 12, 12, 0]}
-                animationDuration={800}
-                animationEasing="ease-out"
-                barSize={35}
-              >
-                {dashboardData.map((entry, index) => (
-                  <Cell 
-                    key={`cell-${index}`} 
-                    fill={`url(#gradient-${entry.factor})`}
-                    className={`cursor-pointer transition-all duration-200 ${
-                      selectedFactor === entry.factor 
-                        ? 'opacity-100 shadow-lg shadow-violet-500/20' 
-                        : 'opacity-90 hover:opacity-100'
-                    }`}
-                    onClick={() => setSelectedFactor(entry.factor)}
-                    style={{
-                      filter: selectedFactor === entry.factor ? 'brightness(1.1)' : 'none'
-                    }}
-                  />
-                ))}
-              </Bar>
+                <defs>
+                  {dashboardData.map((entry: any, index: number) => (
+                    <GradientBar key={entry.factor} entry={entry} index={index} />
+                  ))}
+                </defs>
+                <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
+                <XAxis
+                  type="number"
+                  domain={[0, 1]}
+                  stroke="#6b7280"
+                  tick={{ fill: '#9ca3af', fontSize: 12 }}
+                  tickLine={{ stroke: '#4b5563' }}
+                  label={{ value: '相关性得分', position: 'insideBottom', offset: -5, fill: '#9ca3af', fontSize: 13 }}
+                  tickMargin={8}
+                />
+                <YAxis
+                  type="category"
+                  dataKey="name"
+                  stroke="#6b7280"
+                  tick={{ fill: '#d1d5db', fontSize: 12, fontWeight: 500 }}
+                  tickLine={{ stroke: '#4b5563' }}
+                  width={75}
+                />
+                <Tooltip
+                  contentStyle={{
+                    backgroundColor: 'rgba(17, 24, 39, 0.98)',
+                    border: '1px solid rgba(139, 92, 246, 0.3)',
+                    borderRadius: '8px',
+                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.5)',
+                    padding: '12px',
+                    color: '#e5e7eb'
+                  }}
+                  wrapperStyle={{
+                    outline: 'none',
+                    border: 'none',
+                    boxShadow: 'none',
+                    backgroundColor: 'transparent',
+                    background: 'transparent'
+                  }}
+                  itemStyle={{
+                    padding: '0',
+                    margin: '0',
+                    backgroundColor: 'transparent',
+                    background: 'transparent'
+                  }}
+                  labelStyle={{
+                    display: 'none',
+                    backgroundColor: 'transparent',
+                    background: 'transparent'
+                  }}
+                  cursor={{ fill: 'transparent' }}
+                  formatter={(value: number, name: string, props: any) => {
+                    if (name === 'influence_score') {
+                      const corr = props.payload.correlation || 0
+                      const corrIcon = corr > 0 ? '↑' : corr < 0 ? '↓' : '—'
+                      const corrColor = corr > 0 ? '#60a5fa' : corr < 0 ? '#f87171' : '#9ca3af'
+                      return [
+                        <div key="tooltip" className="space-y-1.5">
+                          <div className="text-gray-200 font-semibold text-sm">{props.payload.name}</div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-cyan-400 font-medium">相关性得分:</span>
+                            <span className="text-white font-bold">{value.toFixed(3)}</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-gray-400">相关系数:</span>
+                            <span style={{ color: corrColor }} className="font-semibold">
+                              {corrIcon} {Math.abs(corr).toFixed(3)}
+                            </span>
+                          </div>
+                        </div>,
+                        ''
+                      ]
+                    }
+                    return [value.toFixed(3), name]
+                  }}
+                  labelFormatter={() => ''}
+                />
+                <Bar
+                  dataKey="influence_score"
+                  radius={[0, 12, 12, 0]}
+                  animationDuration={800}
+                  animationEasing="ease-out"
+                  barSize={35}
+                >
+                  {dashboardData.map((entry: any, index: number) => (
+                    <Cell
+                      key={`cell-${index}`}
+                      fill={`url(#gradient-${entry.factor})`}
+                      className={`cursor-pointer transition-all duration-200 ${selectedFactor === entry.factor
+                          ? 'opacity-100 shadow-lg shadow-violet-500/20'
+                          : 'opacity-90 hover:opacity-100'
+                        }`}
+                      onClick={() => setSelectedFactor(entry.factor)}
+                      style={{
+                        filter: selectedFactor === entry.factor ? 'brightness(1.1)' : 'none'
+                      }}
+                    />
+                  ))}
+                </Bar>
               </BarChart>
             </ResponsiveContainer>
           </div>
-          
+
           {/* 图例：显示相关性指示 - 2x2网格布局 */}
           <div className="mt-6">
             <div className="grid grid-cols-2 gap-3 w-full">
-              {dashboardData.map(item => {
+              {dashboardData.map((item: any) => {
                 const isSelected = selectedFactor === item.factor
                 const corr = item.correlation || 0
                 const CorrIcon = corr > 0 ? TrendingUp : corr < 0 ? TrendingDown : Minus
                 const corrColor = corr > 0 ? 'text-blue-400' : corr < 0 ? 'text-red-400' : 'text-gray-500'
-                
+
                 return (
                   <button
                     key={item.factor}
                     onClick={() => setSelectedFactor(item.factor)}
-                    className={`group flex items-center justify-between gap-3 px-5 py-3 rounded-xl transition-all duration-200 ${
-                      isSelected
+                    className={`group flex items-center justify-between gap-3 px-5 py-3 rounded-xl transition-all duration-200 ${isSelected
                         ? 'bg-gradient-to-r from-violet-500/20 to-purple-500/20 border-2 border-violet-500/50 shadow-lg shadow-violet-500/20 scale-[1.02]'
                         : 'bg-dark-700/40 border border-white/10 hover:border-violet-500/30 hover:bg-dark-700/60'
-                    }`}
+                      }`}
                   >
                     <div className="flex items-center gap-3 flex-1 min-w-0">
-                      <div 
+                      <div
                         className="w-4 h-4 rounded-full shadow-sm flex-shrink-0"
-                        style={{ 
+                        style={{
                           backgroundColor: item.color.main,
                           boxShadow: `0 0 10px ${item.color.main}50`
                         }}
                       />
-                      <span className={`text-sm font-semibold transition-colors truncate ${
-                        isSelected ? 'text-gray-100' : 'text-gray-300 group-hover:text-gray-100'
-                      }`}>
+                      <span className={`text-sm font-semibold transition-colors truncate ${isSelected ? 'text-gray-100' : 'text-gray-300 group-hover:text-gray-100'
+                        }`}>
                         {item.name}
                       </span>
                     </div>
@@ -345,13 +342,12 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                   <span className="text-xs text-gray-400">相关性得分</span>
                   <span className="text-sm font-bold text-gray-200">{currentFactor.influence_score.toFixed(3)}</span>
                 </div>
-                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${
-                  currentFactor.correlation > 0 
-                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400' 
-                    : currentFactor.correlation < 0 
-                    ? 'bg-red-500/10 border-red-500/30 text-red-400'
-                    : 'bg-dark-700/50 border-white/5 text-gray-400'
-                }`}>
+                <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${currentFactor.correlation > 0
+                    ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+                    : currentFactor.correlation < 0
+                      ? 'bg-red-500/10 border-red-500/30 text-red-400'
+                      : 'bg-dark-700/50 border-white/5 text-gray-400'
+                  }`}>
                   {currentFactor.correlation > 0 ? (
                     <TrendingUp className="w-3.5 h-3.5" />
                   ) : currentFactor.correlation < 0 ? (
@@ -366,7 +362,7 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
               </div>
             )}
           </div>
-          
+
           {currentScatterData.length > 0 && selectedFactor && selectedColor ? (
             <ResponsiveContainer width="100%" height={420}>
               <ScatterChart
@@ -380,33 +376,33 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                   </linearGradient>
                 </defs>
                 <CartesianGrid strokeDasharray="3 3" stroke="#374151" opacity={0.3} />
-                <XAxis 
+                <XAxis
                   type="number"
                   dataKey="x"
                   name={FACTOR_NAMES_CN[selectedFactor] || selectedFactor}
                   stroke="#6b7280"
                   tick={{ fill: '#9ca3af', fontSize: 11 }}
                   tickLine={{ stroke: '#4b5563' }}
-                  label={{ 
-                    value: FACTOR_NAMES_CN[selectedFactor] || selectedFactor, 
-                    position: 'insideBottom', 
-                    offset: -10, 
+                  label={{
+                    value: FACTOR_NAMES_CN[selectedFactor] || selectedFactor,
+                    position: 'insideBottom',
+                    offset: -10,
                     fill: '#9ca3af',
                     fontSize: 12,
                     fontWeight: 500
                   }}
                 />
-                <YAxis 
+                <YAxis
                   type="number"
                   dataKey="y"
                   name="供电量"
                   stroke="#6b7280"
                   tick={{ fill: '#9ca3af', fontSize: 11 }}
                   tickLine={{ stroke: '#4b5563' }}
-                  label={{ 
-                    value: '供电量 (MW)', 
-                    angle: -90, 
-                    position: 'insideLeft', 
+                  label={{
+                    value: '供电量 (MW)',
+                    angle: -90,
+                    position: 'insideLeft',
                     fill: '#9ca3af',
                     fontSize: 12,
                     fontWeight: 500
@@ -463,13 +459,13 @@ export function MultiFactorInfluencePanel({ influenceData }: MultiFactorInfluenc
                   }}
                   labelFormatter={() => ''}
                 />
-                <Scatter 
+                <Scatter
                   name="数据点"
                   dataKey="y"
                   fill={selectedColor.main}
                   fillOpacity={0.7}
                 >
-                  {currentScatterData.map((entry, index) => (
+                  {currentScatterData.map((entry: any, index: number) => (
                     <Cell
                       key={`scatter-${index}`}
                       fill={selectedColor.main}

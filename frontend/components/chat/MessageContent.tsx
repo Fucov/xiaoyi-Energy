@@ -558,27 +558,8 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       let historicalZones = semantic_zones.map((z: any) => ({ ...z, isPrediction: false }));
       let predictionZones = (prediction_semantic_zones || []).map((z: any) => ({ ...z, isPrediction: true }));
 
-      // 2. Strict Interval Partitioning (if predictionStartDay is available)
-      if (predictionStartDay) {
-        // Historical: End at predictionStartDay (inclusive/exclusive boundary logic)
-        historicalZones = historicalZones.map((z: any) => {
-          // If zone starts after prediction start, discard it (it belongs to prediction)
-          if (z.startDate >= predictionStartDay) return null;
-          // If zone ends after prediction start, clip it
-          if (z.endDate > predictionStartDay) return { ...z, endDate: predictionStartDay };
-          return z;
-        }).filter(Boolean);
-
-        // Prediction: Start at predictionStartDay
-        predictionZones = predictionZones.map((z: any) => {
-          // If zone ends before prediction start, discard it (belongs to history)
-          // But usually prediction zones are strictly after.
-          if (z.endDate <= predictionStartDay) return null;
-          // If zone starts before prediction start, clip it
-          if (z.startDate < predictionStartDay) return { ...z, startDate: predictionStartDay };
-          return z;
-        }).filter(Boolean);
-      }
+      // 2. Strict Interval Partitioning - REMOVED to avoid hiding valid zones at boundary
+      // Trust the lists provided by backend (semantic_zones vs prediction_semantic_zones)
 
       // 3. CRITICAL: Aggregate raw zones (anomalyZones) into semantic zones as events
       // This enables the "Event Flow" tooltip to show the timeline of raw zones
@@ -587,13 +568,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
         // Find all raw zones that overlap with this semantic zone
         const overlappingRawZones = anomalyZones.filter((rawZone: any) => {
-          const rawStart = new Date(rawZone.startDate).getTime();
-          const rawEnd = new Date(rawZone.endDate).getTime();
-          const semStart = new Date(semanticZone.startDate).getTime();
-          const semEnd = new Date(semanticZone.endDate).getTime();
-
-          // Check if there's any overlap
-          return rawStart <= semEnd && rawEnd >= semStart;
+          // Use string comparison for dates (YYYY-MM-DD) to avoid timezone issues
+          // A overlaps B if StartA <= EndB AND EndA >= StartB
+          return rawZone.startDate <= semanticZone.endDate && rawZone.endDate >= semanticZone.startDate;
         });
 
         // Convert raw zones to event format for tooltip display
@@ -852,19 +829,21 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
 
     if (!currentZone) {
+      // Fallback to simple point tooltip
       const point = payload[0].payload;
       return (
         <div className="bg-gray-900/95 border border-white/10 rounded-lg p-3 shadow-xl backdrop-blur-md min-w-[200px]">
-          <div className="text-gray-400 text-xs mb-1">{label}</div>
+          <div className="text-gray-400 text-xs mb-1">{date}</div>
           <div className="flex justify-between items-center">
             <span className="text-gray-200">价格</span>
             <span className="font-mono text-white font-bold">{Number(point.y || point.close).toFixed(2)}</span>
           </div>
         </div>
-      )
+      );
     }
 
-    // Zone Tooltip Logic
+    // Zone Tooltip
+    // Fix: Revert colors to A-share style (Red=Up, Green=Down)
     const isPositive = (currentZone.avg_return || 0) >= 0;
     const color = isPositive ? '#ef4444' : '#10b981';
     const bgColor = isPositive ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)';
@@ -882,8 +861,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         >
           <div className="flex items-center gap-2">
             <span className={`font-bold font-mono ${isPositive ? 'text-red-400' : 'text-green-400'}`}>
-              {/* FIX: Ensure avg_return exists before formatting, or use change_pct */}
-              {((currentZone.avg_return || currentZone.change_pct || 0) * 100).toFixed(1)}%
+              {(currentZone.avg_return * 100).toFixed(1)}%
             </span>
             <span className="text-xs text-white/50">
               {currentZone.startDate} ~ {currentZone.endDate}
@@ -899,15 +877,11 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           </div>
 
           <div className="space-y-3">
-            {/* Logic to show events: prefer 'events' array, else show description */}
-            {/* Ensure events is an array and has length */}
-            {currentZone.events && Array.isArray(currentZone.events) && currentZone.events.length > 0 ? (
+            {/* If we have specific sub-events in 'events' field */}
+            {currentZone.events && currentZone.events.length > 0 ? (
               currentZone.events.map((evt: any, idx: number) => {
-                const startP = evt.startPrice || 0;
-                const endP = evt.endPrice || 0;
-                const evtReturn = startP ? ((endP - startP) / startP) : (evt.avg_return || 0);
+                const evtReturn = evt.startPrice ? ((evt.endPrice - evt.startPrice) / evt.startPrice) : (evt.avg_return || 0);
                 const isEvtPos = evtReturn >= 0;
-
                 return (
                   <div key={idx} className="relative pl-3 border-l border-gray-700">
                     <div className="absolute -left-[3px] top-1.5 w-1.5 h-1.5 rounded-full bg-gray-600"></div>
@@ -1292,6 +1266,10 @@ function InteractiveChart({ content }: { content: ChartContent }) {
             {/* 异常区域与悬浮提示 - Bloomberg风格 */}
             {/* 区域渲染逻辑：语义合并 vs 原始分段 */}
             {/* 1. Semantic Regimes: Areas */}
+            {/* 2. Anomalies: Points of Interest - Rendered before zones to sit behind/above? No, dots on top usually. */}
+            {/* But we keep order: Zones first, then Dots? Recharts renders in order. */}
+            {/* Let's render Zones first. */}
+
             {useSemanticRegimes && semanticRegimes.map((regime: any, idx: number) => {
               // CRITICAL FIX: Use sentiment field (from backend) instead of displayType
               const sentiment = regime.sentiment || regime.displayType;
@@ -1302,25 +1280,47 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               // A-share colors: Red for Up/Positive, Green for Down/Negative, Gray for Sideways
               const fill = isPositive ? '#ef4444' : (isNegative ? '#10b981' : '#6b7280');
 
-              // Prediction Styling
+              // Prediction Styling - User wants "Semantic Version" (solid block), not dashed "Raw" look
               const isPrediction = regime.is_prediction;
-              const baseOpacity = isPrediction ? 0.15 : (isSideways ? 0.2 : 0.3); // High transparency for prediction
+              // Opacity: History=0.3, Prediction=0.2 (slightly lighter but distinctive)
+              const baseOpacity = isPrediction ? 0.2 : (isSideways ? 0.2 : 0.3);
 
               const uniqueKey = `regime-area-${regime.startDate}-${idx}`;
+
+              // FIX: Find closest valid dates in chartData to prevent gaps (e.g. if zone starts on Sat)
+              const findClosestDate = (targetDate: string) => {
+                if (chartData.find((d: any) => d.name === targetDate)) return targetDate;
+                // If not found, find closest index? simpler: just use valid data boundaries if completely out?
+                // Simple fallback: If zone is within range, find nearest.
+                // For now, let's just assume Recharts handles Strings better if they exist.
+                // If they DON'T exist, we must snap.
+                // Sorted chart dates:
+                const chartDates = chartData.map((d: any) => d.name).sort();
+                if (targetDate < chartDates[0]) return chartDates[0];
+                if (targetDate > chartDates[chartDates.length - 1]) return chartDates[chartDates.length - 1];
+                // Find nearest
+                // This is expensive O(N) inside render loop. Optimization: pre-calculate chartDates map?
+                // But for < few hundred points it is fine.
+                return chartData.reduce((prev: any, curr: any) => {
+                  return (Math.abs(new Date(curr.name).getTime() - new Date(targetDate).getTime()) < Math.abs(new Date(prev.name).getTime() - new Date(targetDate).getTime()) ? curr : prev);
+                }).name || targetDate;
+              };
+
+              const validStart = findClosestDate(regime.startDate);
+              const validEnd = findClosestDate(regime.endDate);
 
               return (
                 <ReferenceArea
                   key={uniqueKey}
-                  x1={regime.startDate}
-                  x2={regime.endDate}
+                  x1={validStart}
+                  x2={validEnd}
                   fill={fill}
                   fillOpacity={baseOpacity}
                   stroke={isPrediction ? fill : "none"}
-                  strokeDasharray={isPrediction ? "5 5" : undefined}
+                  strokeWidth={isPrediction ? 1 : 0}
+                  // REMOVED dashes to look like standard Semantic Zone
                   className="cursor-pointer hover:opacity-80 transition-opacity"
                   onMouseEnter={() => {
-                    // console.log('[SEMANTIC ZONE HOVER]', regime);
-                    // console.log('[SEMANTIC ZONE EVENTS]', regime.events);
                     setActiveZone(regime);
                   }}
                   onMouseLeave={() => setActiveZone(null)}
@@ -1337,13 +1337,10 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               );
             })}
 
-
-
-
             {/* 2. Anomalies: Points of Interest */}
             {visibleAnomalies.map((anom: any, idx: number) => {
               // Ensure anomaly is within view
-              const isInView = true; // Recharts ReferenceDot handles visibility automatically if x is valid
+              const isInView = true;
 
               if (!isInView) return null;
 
@@ -1369,8 +1366,6 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               );
             })}
 
-
-
             {!useSemanticRegimes && visibleZones.map((zone: any, idx: number) => {
               // A股配色：红涨绿跌
               const isPositive = (zone.avg_return || 0) >= 0
@@ -1384,26 +1379,30 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               // 使用唯一key：startDate-endDate组合
               const uniqueKey = `zone-${zone.startDate}-${zone.endDate}-${idx}`
 
-              // FIX: Ensure minimum width for ALL zones to guarantee visibility
-              let displayStartDate = zone.startDate;
-              let displayEndDate = zone.endDate;
+              // FIX: Snap dates
+              const findClosestDate = (targetDate: string) => {
+                if (chartData.length === 0) return targetDate;
+                const first = chartData[0].name;
+                const last = chartData[chartData.length - 1].name;
+                if (targetDate < first) return first;
+                if (targetDate > last) return last;
+                if (chartData.find((d: any) => d.name === targetDate)) return targetDate;
 
-              const startIdx = chartData.findIndex((d: any) => d.name === displayStartDate);
-              const endIdx = chartData.findIndex((d: any) => d.name === displayEndDate);
-
-              if (startIdx >= 0) {
-                // For single point or very narrow intervals, expand slightly
-                if (startIdx === endIdx) {
-                  if (startIdx > 0) displayStartDate = chartData[startIdx - 1].name;
-                  else if (startIdx < chartData.length - 1) displayEndDate = chartData[startIdx + 1].name;
-                } else if (startIdx + 1 === endIdx) {
-                  // If adjacent points (e.g. idx 5 and 6), ReferenceArea might be thin between them.
-                  // Expand end to ensure it covers the gap.
-                  // Actually Recharts ReferenceArea covers from x1 to x2.
-                  // If x1=June1 and x2=June2, it covers the interval.
-                  // But let's act robustly.
+                // Simple nearest search
+                let minDiff = Infinity;
+                let closest = targetDate;
+                for (const pt of chartData) {
+                  const diff = Math.abs(new Date(pt.name).getTime() - new Date(targetDate).getTime());
+                  if (diff < minDiff) {
+                    minDiff = diff;
+                    closest = pt.name;
+                  }
                 }
-              }
+                return closest;
+              };
+
+              const displayStartDate = findClosestDate(zone.startDate);
+              const displayEndDate = findClosestDate(zone.endDate);
 
               // Prediction Logic
               const isPrediction = zone.is_prediction || zone.zone_type === 'prediction_regime';
@@ -1416,10 +1415,14 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               let strokeOpacity = impact;
               let strokeWidth = 1;
 
+              // FIX: Prediction zones in RAW view should ALSO be displayed, maybe distinct style?
               if (isPrediction) {
-                return null;
+                strokeDasharray = '3 3'; // Distinctive for prediction
+                strokeWidth = 2;
               } else {
-                fill = 'none';
+                // Standard raw zone style
+                // fill = 'none'; // Keep fill? User said "raw still has missing interval", maybe because fill was none?
+                // Let's keep fill to ensure visibility
                 strokeOpacity = 1;
                 strokeWidth = 2; // Thicker stroke for visibility
               }

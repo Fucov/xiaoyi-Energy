@@ -114,6 +114,7 @@ export interface MessageData {
     startDate: string
     endDate: string
     summary: string
+    event_summary?: string
     sentiment: 'positive' | 'negative'
   }>
   anomaly_zones_ticker: string | null
@@ -145,6 +146,41 @@ export interface MessageData {
 
 // 兼容旧版类型别名
 export type AnalysisSessionData = MessageData
+
+/**
+ * 影响因子分析相关接口
+ */
+export interface FactorDataPoint {
+  date: string
+  power: number
+  factor_value: number
+}
+
+export interface FactorAnalysis {
+  factor: string
+  influence_score: number
+  correlation: number
+  data: FactorDataPoint[]
+}
+
+export interface FactorRankingItem {
+  factor: string
+  factor_name_cn: string
+  influence_score: number
+  correlation: number
+}
+
+export interface InfluenceAnalysisResult {
+  summary: string
+  time_range: {
+    start: string
+    end: string
+  }
+  factors: Record<string, FactorAnalysis>
+  ranking: FactorRankingItem[]
+  overall_score?: number
+}
+
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000'
 
