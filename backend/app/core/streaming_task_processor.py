@@ -597,6 +597,7 @@ class StreamingTaskProcessor:
             redis_client = get_redis()
             cache_key = f"power_zones_v3:{region_code}"
             cached_zones_json = None
+            trend_results = {}  # 初始化，避免缓存命中时 UnboundLocalError
 
             try:
                 cached_zones_json = redis_client.get(cache_key)
@@ -1421,28 +1422,31 @@ class StreamingTaskProcessor:
 
         if "rag" in results and results["rag"]:
             context_parts.append("=== 研报内容 ===")
+            context_parts.append("引用时请使用格式：（来源：《报告名称》，第N页）")
             for source in results["rag"][:5]:
+                # 去除 .pdf 后缀，清理文件名作为报告名称
+                report_name = source.filename.replace('.pdf', '').replace('.PDF', '')
                 context_parts.append(
-                    f"[{source.filename} 第{source.page}页]: {source.content_snippet}"
+                    f"《{report_name}》第{source.page}页：{source.content_snippet}"
                 )
 
         if "search" in results and results["search"]:
             context_parts.append("\n=== 网络搜索 ===")
+            context_parts.append("引用时请使用格式：[新闻标题](URL)")
             for item in results["search"][:5]:
-                context_parts.append(
-                    f"[{item.get('title', '')}]({item.get('url', '')}): {item.get('content', '')[:100]}"
-                )
+                title = item.get('title', '')
+                url = item.get('url', '')
+                content = item.get('content', '')[:150]
+                context_parts.append(f"标题: {title}\n链接: {url}\n内容: {content}")
 
         if "domain" in results and results["domain"]:
             context_parts.append("\n=== 即时新闻 ===")
+            context_parts.append("引用时请使用格式：[新闻标题](URL)")
             for item in results["domain"][:5]:
                 title = item.get("title", "")
                 url = item.get("url", "")
-                content = item.get("content", "")[:100]
-                if url:
-                    context_parts.append(f"[{title}]({url}): {content}")
-                else:
-                    context_parts.append(f"- {title}: {content}")
+                content = item.get("content", "")[:150]
+                context_parts.append(f"标题: {title}\n链接: {url}\n内容: {content}")
 
         context = "\n".join(context_parts) if context_parts else ""
 

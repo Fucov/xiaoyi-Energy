@@ -468,6 +468,13 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                       <div className="glass rounded-2xl p-4">
                         {influenceData ? (
                           <MultiFactorInfluencePanel influenceData={influenceData} />
+                        ) : legacyInfluenceData ? (
+                          <div>
+                            <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent mb-3 flex items-center gap-2">
+                              <span>📊</span> 多因素相关性分析
+                            </h3>
+                            <MultiFactorInfluenceAxis influenceData={legacyInfluenceData} />
+                          </div>
                         ) : emotionData ? (
                           <div className="space-y-3">
                             <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent mb-3 flex items-center gap-2">

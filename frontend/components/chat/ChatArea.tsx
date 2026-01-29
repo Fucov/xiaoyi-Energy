@@ -151,9 +151,9 @@ export const PREDICTION_STEPS: Omit<Step, 'status' | 'message'>[] = [
 // 默认快速追问建议
 const defaultQuickSuggestions = [
   '预测北京未来30天的供电需求',
-  '分析上海最近用电量趋势',
+  '分析上海最近一段时间的用电情况',
   '查看南京的天气对供电的影响',
-  '生成一份北京过去30天供电需求分析报告',
+  '看看广州未来三个月的供电趋势',
 ]
 
 interface ChatAreaProps {

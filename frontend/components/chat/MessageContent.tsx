@@ -35,6 +35,41 @@ function preprocessMarkdown(text: string): string {
     '<strong>$1</strong>'
   )
 
+  // 处理 markdown 链接中 URL 含有特殊字符的情况
+  // 匹配 [text](url) 格式，对 URL 中的特殊字符进行编码
+  processed = processed.replace(
+    /\[([^\]]+)\]\(([^)]+)\)/g,
+    (match, linkText, url) => {
+      // 如果 URL 已经是正常的 http/https 链接，保持不变
+      if (/^https?:\/\/[^\s\u4e00-\u9fa5()]+$/.test(url)) {
+        return match
+      }
+      // 对含有中文或特殊字符的 URL 进行编码处理
+      try {
+        // 分离协议和路径
+        const protocolMatch = url.match(/^(https?:\/\/|rag:\/\/)(.*)$/)
+        if (protocolMatch) {
+          const [, protocol, path] = protocolMatch
+          // 对路径部分进行编码，但保留常用字符
+          const encodedPath = path
+            .split('/')
+            .map((segment: string) => {
+              // 如果包含特殊字符，进行编码
+              if (/[\u4e00-\u9fa5()（）#=]/.test(segment)) {
+                return encodeURIComponent(segment)
+              }
+              return segment
+            })
+            .join('/')
+          return `[${linkText}](${protocol}${encodedPath})`
+        }
+      } catch (e) {
+        // 编码失败，返回原文
+      }
+      return match
+    }
+  )
+
   return processed
 }
 
@@ -118,18 +153,22 @@ export function MessageContent({ content }: MessageContentProps) {
             a: ({ href, children }) => {
               // 处理 rag:// 协议（研报链接）
               if (href?.startsWith('rag://')) {
-                // 解析 rag://文件名.pdf#page=页码 格式
-                const match = href.match(/^rag:\/\/(.+?)(?:#page=(\d+))?$/)
-                const filename = match?.[1] || href.replace('rag://', '')
+                // 解析 rag://文件名.pdf#page=页码 格式，支持 URL 编码
+                let decodedHref = href
+                try {
+                  decodedHref = decodeURIComponent(href)
+                } catch (e) {
+                  // 解码失败，使用原始值
+                }
+                const match = decodedHref.match(/^rag:\/\/(.+?)(?:#page=(\d+))?$/)
+                const filename = match?.[1] || decodedHref.replace('rag://', '')
                 const page = match?.[2] || '1'
+                // 清理文件名，去除 .pdf 后缀
+                const displayName = filename.replace(/\.pdf$/i, '')
                 return (
                   <span
-                    className="text-violet-400 hover:text-violet-300 cursor-pointer underline"
-                    title={`研报: ${filename} 第${page}页`}
-                    onClick={() => {
-                      // TODO: 可以打开研报预览弹窗
-                      alert(`研报来源: ${filename}\n页码: ${page}`)
-                    }}
+                    className="text-violet-400 hover:text-violet-300 cursor-pointer"
+                    title={`研报: ${displayName} 第${page}页`}
                   >
                     {children}
                   </span>
