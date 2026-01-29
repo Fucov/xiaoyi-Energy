@@ -1186,7 +1186,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       {hasBacktestSupport && (
         <BacktestControls
           isLoading={backtest.isLoading}
-          mae={backtest.metrics?.mae ?? null}
+          mae={backtest.metrics?.mape ?? null}
           onReset={backtest.resetBacktest}
         />
       )}
@@ -1238,7 +1238,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
       <div
         ref={chartContainerRef}
-        className="w-full h-64 relative"
+        className="w-full h-[512px] relative"
         onMouseDown={handleMouseDown}
         style={{
           cursor: isDragging ? 'grabbing' : 'grab',
@@ -1249,7 +1249,6 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           <LineChart
             data={displayData}
             margin={{ top: 5, right: 10, left: 0, bottom: 20 }}
-            onClick={handleChartClick}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4a" />
             <XAxis
@@ -1951,7 +1950,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           />
         )
       }
-    </div >
+    </div>
   )
 }
 

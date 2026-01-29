@@ -70,6 +70,7 @@ class RAGSource(BaseModel):
     page: int  # 页码
     content_snippet: str  # 摘要片段
     score: float = 0.0  # 相关度分数
+    doc_id: str = ""  # 文档 ID，用于获取 PDF
 
 
 class SummarizedNewsItem(BaseModel):

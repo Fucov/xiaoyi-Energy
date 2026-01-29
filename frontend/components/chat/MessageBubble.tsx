@@ -8,6 +8,7 @@ import { MessageContent } from './MessageContent'
 import { StepProgress } from './StepProgress'
 import { ThinkingSection } from './ThinkingSection'
 import { RAGSourceCard } from './RAGSourceCard'
+import { MultiFactorInfluencePanel } from './MultiFactorInfluencePanel'
 
 interface MessageBubbleProps {
   message: Message
@@ -308,6 +309,15 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                   }
                 }
 
+                // 解析 Influence 数据
+                const influenceText = texts.find(t => t.text.startsWith('__INFLUENCE_JSON__'))
+                let influenceData = null
+                if (influenceText) {
+                  try {
+                    influenceData = JSON.parse(influenceText.text.replace('__INFLUENCE_JSON__', ''))
+                  } catch (e) { console.error('Failed to parse influence data', e) }
+                }
+
                 return (
                   <div className={cn(
                     "space-y-4",
@@ -317,11 +327,13 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     <div className="grid grid-cols-1 lg:grid-cols-[1fr_2fr] gap-4">
                       {/* 左侧：市场情绪 */}
                       <div className="glass rounded-2xl p-4">
-                        <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                          <span>😊</span> 市场情绪
-                        </h3>
-                        {emotionData ? (
+                        {influenceData ? (
+                          <MultiFactorInfluencePanel influenceData={influenceData} />
+                        ) : emotionData ? (
                           <div className="space-y-3">
+                            <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent mb-3 flex items-center gap-2">
+                              <span>📊</span> 相关性分析
+                            </h3>
                             <EmotionGauge emotion={emotionData.score} description="" />
                             {emotionData.description && (
                               <div className="bg-dark-700/40 rounded-lg px-3 py-2 border border-white/5">
@@ -340,17 +352,39 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                       {/* 右侧：相关新闻 + 研报来源（1:1 高度比例） */}
                       <div className="grid grid-rows-2 gap-4 min-h-[400px]">
                         {/* 相关新闻（占 1 份高度） */}
-                        <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
-                          <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
-                            <span>📰</span> 相关新闻
-                          </h3>
-                          <div className="flex-1 overflow-y-auto">
+                        <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-transparent to-purple-500/5" />
+                          <div className="relative flex-shrink-0 mb-4">
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <div className="p-1.5 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 border border-blue-500/30">
+                                  <span className="text-base">📰</span>
+                                </div>
+                                <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent">
+                                  相关新闻
+                                </h3>
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex-1 relative">
                             {newsTable ? (
                               <MessageContent content={newsTable} />
                             ) : (
-                              <div className="text-sm text-gray-400 flex items-center gap-2">
-                                <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
-                                <span>正在获取新闻...</span>
+                              <div className="flex flex-col items-center justify-center h-full text-gray-400">
+                                {(() => {
+                                  const isComplete = message.renderMode !== 'thinking' && (!message.steps || message.steps.every(s => s.status === 'completed' || s.status === 'failed'))
+                                  if (isComplete) {
+                                    return <span className="text-sm text-gray-500">暂无相关新闻</span>
+                                  }
+                                  return (
+                                    <>
+                                      <div className="relative mb-3">
+                                        <div className="w-10 h-10 border-4 border-blue-500/20 border-t-blue-500 rounded-full animate-spin" />
+                                      </div>
+                                      <span className="text-sm">正在获取新闻...</span>
+                                    </>
+                                  )
+                                })()}
                               </div>
                             )}
                           </div>
@@ -358,25 +392,57 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
                         {/* 研报来源（占 2 份高度） */}
                         {message.ragSources && message.ragSources.length > 0 ? (
-                          <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
-                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
-                              <span>📚</span> 研报来源
-                              <span className="text-xs text-gray-500 font-normal">
-                                ({message.ragSources.length} 篇相关研报)
-                              </span>
-                            </h3>
-                            <div className="flex-1 overflow-y-auto">
-                              <RAGSourceCard sources={message.ragSources} />
+                          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                            <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
+                            <div className="relative flex-shrink-0 mb-4">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
+                                    <span className="text-base">📚</span>
+                                  </div>
+                                  <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent">
+                                    研报来源
+                                  </h3>
+                                  <span className="text-xs text-gray-500 px-2 py-0.5 bg-dark-700/50 rounded border border-white/5 font-normal">
+                                    {message.ragSources.length} 篇
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex-1 relative">
+                              <div>
+                                <RAGSourceCard sources={message.ragSources} />
+                              </div>
                             </div>
                           </div>
                         ) : (
-                          <div className="glass rounded-2xl p-4 overflow-hidden flex flex-col">
-                            <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2 flex-shrink-0">
-                              <span>📚</span> 研报来源
-                            </h3>
-                            <div className="flex-1 flex items-center justify-center text-sm text-gray-400">
-                              <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse mr-2" />
-                              <span>正在检索研报...</span>
+                          <div className="relative overflow-hidden rounded-xl bg-gradient-to-br from-dark-800/80 via-dark-800/60 to-dark-900/80 p-5 border border-white/10 shadow-xl backdrop-blur-sm flex flex-col">
+                            <div className="absolute inset-0 bg-gradient-to-r from-violet-500/5 via-transparent to-purple-500/5" />
+                            <div className="relative flex-shrink-0 mb-4">
+                              <div className="flex items-center gap-2">
+                                <div className="p-1.5 rounded-lg bg-gradient-to-br from-violet-500/20 to-purple-500/20 border border-violet-500/30">
+                                  <span className="text-base">📚</span>
+                                </div>
+                                <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent">
+                                  研报来源
+                                </h3>
+                              </div>
+                            </div>
+                            <div className="flex-1 flex flex-col items-center justify-center text-gray-400">
+                              {(() => {
+                                const isComplete = message.renderMode !== 'thinking' && (!message.steps || message.steps.every(s => s.status === 'completed' || s.status === 'failed'))
+                                if (isComplete) {
+                                  return <span className="text-sm text-gray-500">暂无研报数据</span>
+                                }
+                                return (
+                                  <>
+                                    <div className="relative mb-3">
+                                      <div className="w-10 h-10 border-4 border-violet-500/20 border-t-violet-500 rounded-full animate-spin" />
+                                    </div>
+                                    <span className="text-sm">正在检索研报...</span>
+                                  </>
+                                )
+                              })()}
                             </div>
                           </div>
                         )}
@@ -385,13 +451,13 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
                     {/* 价格预测趋势图（全宽） */}
                     <div className="glass rounded-2xl p-4">
-                      <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
-                        <span>📈</span> 价格走势分析
+                      <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent mb-3 flex items-center gap-2">
+                        <span>📈</span> 供电量走势分析
                       </h3>
                       {priceChart ? (
                         <MessageContent content={priceChart} />
                       ) : (
-                        <div className="text-sm text-gray-400 flex items-center gap-2 h-64 items-center justify-center">
+                        <div className="text-sm text-gray-400 flex items-center gap-2 h-[512px] items-center justify-center">
                           <div className="w-2 h-2 bg-violet-400 rounded-full animate-pulse" />
                           <span>正在生成预测图表...</span>
                         </div>
@@ -400,7 +466,7 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
 
                     {/* 综合分析报告（全宽，最后） */}
                     <div className="glass rounded-2xl p-4">
-                      <h3 className="text-sm font-semibold text-gray-300 mb-3 flex items-center gap-2">
+                      <h3 className="text-xl font-bold bg-gradient-to-r from-gray-200 via-gray-100 to-gray-300 bg-clip-text text-transparent mb-3 flex items-center gap-2">
                         <span>📝</span> 综合分析报告
                       </h3>
                       {reportText ? (
@@ -414,16 +480,18 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                     </div>
 
                     {/* 其他未分类的内容（向后兼容） */}
-                    {contents.filter(c => {
-                      if (c === priceChart || c === reportText) return false
-                      if (emotionText === c) return false
-                      if (newsTable === c) return false
-                      return true
-                    }).map((content, index) => (
-                      <div key={index} className="glass rounded-2xl px-4 py-3 text-gray-200">
-                        <MessageContent content={content} />
-                      </div>
-                    ))}
+                    {
+                      contents.filter(c => {
+                        if (c === priceChart || c === reportText) return false
+                        if (emotionText === c) return false
+                        if (newsTable === c) return false
+                        return true
+                      }).map((content, index) => (
+                        <div key={index} className="glass rounded-2xl px-4 py-3 text-gray-200">
+                          <MessageContent content={content} />
+                        </div>
+                      ))
+                    }
                   </div>
                 )
               }
@@ -514,12 +582,14 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
       </div>
 
       {/* 用户头像 */}
-      {isUser && (
-        <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-sm font-bold">
-          李
-        </div>
-      )}
-    </div>
+      {
+        isUser && (
+          <div className="w-9 h-9 rounded-full bg-gradient-to-br from-orange-400 to-pink-500 flex items-center justify-center flex-shrink-0 text-sm font-bold">
+            李
+          </div>
+        )
+      }
+    </div >
   )
 }
 

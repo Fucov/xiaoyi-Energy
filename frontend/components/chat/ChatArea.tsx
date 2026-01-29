@@ -274,6 +274,8 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     let accumulatedConclusion = '' // 综合报告内容
     let stockTicker = ''  // 股票代码
     let predictionStartDay = ''
+    let accumulatedInfluence: any = null
+    let accumulatedChangePoints: any[] = []
 
     return {
       // 恢复数据（断点续传时使用）
@@ -317,16 +319,22 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
           }
 
           // DEBUG: Log restored zones
-          console.log('[onResume] Restoring Semantic Zones. CurrentData Keys:', Object.keys(currentData))
-          console.log('[onResume] currentData.semantic_zones:', currentData.semantic_zones?.length)
-          console.log('[onResume] currentData.prediction_semantic_zones:', currentData.prediction_semantic_zones?.length)
-          console.log('[onResume] predictionStartDay:', predictionStartDay)
+          // console.log('[onResume] Restoring Semantic Zones.')
 
           if (currentData.semantic_zones) {
             accumulatedSemanticZones = currentData.semantic_zones
           }
           if (currentData.prediction_semantic_zones) {
             accumulatedPredictionSemanticZones = currentData.prediction_semantic_zones
+          }
+
+          // 恢复 RAG 来源 (Merged from origin/main)
+          if (currentData.rag_sources && currentData.rag_sources.length > 0) {
+            setMessages((prev: Message[]) => prev.map((msg: Message) =>
+              msg.id === assistantMessageId
+                ? { ...msg, ragSources: currentData.rag_sources }
+                : msg
+            ))
           }
 
           updateContentsFromStreamData(
@@ -348,45 +356,47 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         }
       },
 
-      // 步骤开始
+      // 步骤开始 - 只在 forecast 模式下更新步骤
       onStepStart: (step: number, stepName: string) => {
-        const steps = PREDICTION_STEPS.map((s, idx) => {
-          const stepNum = idx + 1
-          if (stepNum < step) {
-            return { ...s, status: 'completed' as StepStatus }
-          } else if (stepNum === step) {
-            return { ...s, status: 'running' as StepStatus, message: `${stepName}中...` }
-          }
-          return { ...s, status: 'pending' as StepStatus }
-        })
+        setMessages((prev: Message[]) => prev.map((msg: Message) => {
+          if (msg.id !== assistantMessageId) return msg
+          if (msg.renderMode !== 'forecast') return msg
 
-        setMessages((prev: Message[]) => prev.map((msg: Message) =>
-          msg.id === assistantMessageId
-            ? { ...msg, steps }
-            : msg
-        ))
+          const steps = PREDICTION_STEPS.map((s, idx) => {
+            const stepNum = idx + 1
+            if (stepNum < step) {
+              return { ...s, status: 'completed' as StepStatus }
+            } else if (stepNum === step) {
+              return { ...s, status: 'running' as StepStatus, message: `${stepName}中...` }
+            }
+            return { ...s, status: 'pending' as StepStatus }
+          })
+          return { ...msg, steps }
+        }))
       },
 
-      // 步骤完成
+      // 步骤完成 - 只在 forecast 模式下更新步骤
       onStepComplete: (step: number, data?: any) => {
-        // 捕获股票代码（步骤2完成时）
-        if (step === 2 && data?.stock_code) {
+        // 捕获区域代码（步骤2完成时，无论模式）
+        if (step === 2 && data?.region_code) {
+          stockTicker = data.region_code
+        } else if (step === 2 && data?.stock_code) {
           stockTicker = data.stock_code
         }
 
-        const steps = PREDICTION_STEPS.map((s, idx) => {
-          const stepNum = idx + 1
-          if (stepNum <= step) {
-            return { ...s, status: 'completed' as StepStatus, message: '已完成' }
-          }
-          return { ...s, status: 'pending' as StepStatus }
-        })
+        setMessages((prev: Message[]) => prev.map((msg: Message) => {
+          if (msg.id !== assistantMessageId) return msg
+          if (msg.renderMode !== 'forecast') return msg
 
-        setMessages((prev: Message[]) => prev.map((msg: Message) =>
-          msg.id === assistantMessageId
-            ? { ...msg, steps }
-            : msg
-        ))
+          const steps = PREDICTION_STEPS.map((s, idx) => {
+            const stepNum = idx + 1
+            if (stepNum <= step) {
+              return { ...s, status: 'completed' as StepStatus, message: '已完成' }
+            }
+            return { ...s, status: 'pending' as StepStatus }
+          })
+          return { ...msg, steps }
+        }))
       },
 
       // 思考内容（累积）
@@ -403,12 +413,22 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         ))
       },
 
-      // 意图识别结果
+      // 意图识别结果 - 确认是 forecast 后才初始化步骤
       onIntent: (_intent: string, isForecast: boolean) => {
         const renderMode: RenderMode = isForecast ? 'forecast' : 'chat'
         setMessages((prev: Message[]) => prev.map((msg: Message) =>
           msg.id === assistantMessageId
-            ? { ...msg, renderMode }
+            ? {
+              ...msg,
+              renderMode,
+              ...(isForecast ? {
+                steps: PREDICTION_STEPS.map((s, idx) => ({
+                  ...s,
+                  status: (idx === 0 ? 'completed' : 'pending') as StepStatus,
+                  message: idx === 0 ? '已完成' : undefined
+                }))
+              } : {})
+            }
             : msg
         ))
       },
@@ -462,22 +482,56 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
         } else if (dataType === 'news') {
           accumulatedNews = data as NewsItem[]
           updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones)
+        } else if (dataType === 'influence') {
+          // 多因素相关性数据
+          // console.log('[ChatArea] ===== 收到影响因子数据 =====')
+          const influenceRaw = data as any
+          // 检查是否是新格式（包含factors字段）
+          if (influenceRaw.factors && influenceRaw.correlation_matrix) {
+            // 新格式
+            accumulatedInfluence = influenceRaw
+            const overallScore = influenceRaw.overall_score || 0
+            accumulatedEmotion = {
+              score: overallScore,
+              description: influenceRaw.summary || '相关性分析'
+            }
+          } else {
+            // 旧格式兼容
+            accumulatedInfluence = influenceRaw
+
+            // 兼容：同时设置emotion（使用overall_score或平均值）
+            const overallScore = 0 // Default to 0 for now as simplified compatible logic
+            accumulatedEmotion = { score: overallScore, description: '相关性分析' }
+          }
+
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones, accumulatedInfluence)
         } else if (dataType === 'emotion') {
           const emotionData = data as { score: number; description: string }
           accumulatedEmotion = emotionData
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones, accumulatedInfluence)
         } else if (dataType === 'anomaly_zones') {
-          console.log('[ChatArea] Received anomaly_zones event:', data)
+          // console.log('[ChatArea] Received anomaly_zones event:', data)
           const zonesData = data as { zones: any[]; ticker: string; anomalies?: any[] }
           accumulatedAnomalyZones = zonesData.zones || []
           accumulatedAnomalies = zonesData.anomalies || []
           stockTicker = zonesData.ticker || ''
-          console.log('[ChatArea] Extracted - zones:', accumulatedAnomalyZones.length, 'ticker:', stockTicker, 'anomalies:', accumulatedAnomalies.length)
           // 异常区数据收到后立即更新图表
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones, accumulatedInfluence)
         } else if (dataType === 'anomalies') {
           accumulatedAnomalies = data as any[];
-          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones)
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones, accumulatedInfluence)
+        } else if (dataType === 'change_points') {
+          accumulatedChangePoints = data as any[]
+          // 变点数据收到后即更新图表
+          updateContentsFromStreamData(assistantMessageId, accumulatedTimeSeriesOriginal, accumulatedTimeSeriesFull.length > 0 ? accumulatedTimeSeriesFull : null, accumulatedNews, accumulatedEmotion, null, predictionStartDay, backendSessionId, backendMessageId, accumulatedAnomalyZones, stockTicker, accumulatedAnomalies, accumulatedSemanticZones, accumulatedPredictionSemanticZones, accumulatedInfluence, accumulatedChangePoints)
+        } else if (dataType === 'rag_sources') {
+          const ragSources = data as RAGSource[]
+          setMessages((prev: Message[]) => prev.map((msg: Message) =>
+            msg.id === assistantMessageId
+              ? { ...msg, ragSources }
+              : msg
+          ))
+
         }
       },
 
@@ -1136,15 +1190,22 @@ export function ChatArea({ sessionId: externalSessionId, onSessionCreated }: Cha
     ticker?: string,  // 股票代码
     anomalies?: any[], // 异常点
     semanticZones?: any[], // 语义合并区间
-    predictionSemanticZones?: any[] // 预测语义区间
+    predictionSemanticZones?: any[], // 预测语义区间
+    influence?: any, // 影响因子 (New)
+    changePoints?: any[] // 变点 (New)
   ) => {
     setMessages((prev: Message[]) => prev.map((msg: Message) => {
       if (msg.id !== messageId) return msg
 
       const newContents: (TextContent | ChartContent | TableContent)[] = []
 
-      // 1. 情绪（如果有）
-      if (emotion) {
+      // 1. 情绪/影响因子
+      if (influence) {
+        newContents.push({
+          type: 'text',
+          text: `__INFLUENCE_JSON__${JSON.stringify(influence)}`
+        })
+      } else if (emotion) {
         newContents.push({
           type: 'text',
           text: `__EMOTION_MARKER__${emotion.score}__${emotion.description}__`

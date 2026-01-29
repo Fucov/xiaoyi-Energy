@@ -389,8 +389,19 @@ class StreamingTaskProcessor:
     ):
         """流式预测流程"""
         region_info = region_match.region_info if region_match else None
-        region_name = region_info.region_name if region_info else user_input
         region_code = region_info.region_code if region_info else ""
+
+        if region_info:
+            region_name = region_info.region_name
+        else:
+            # 未指定城市：从历史消息中查找上次使用的城市
+            region_name = self._find_last_region(session) or "北京"
+            print(f"[Forecast] 未指定城市，使用: {region_name}")
+
+        # 将确定的城市名回写到 intent，确保回测时能获取到
+        if not intent.region_name:
+            intent.region_name = region_name
+            message.save_unified_intent(intent)
 
         # === Step 3: 数据获取 ===
         await self._emit_event(
@@ -400,10 +411,9 @@ class StreamingTaskProcessor:
         )
         message.update_step_detail(3, "running", "获取历史数据和新闻...")
 
-        # 限制历史天数，确保不超过Open-Meteo API限制（92天）
-        # 同时确保有足够的数据用于模型训练
-        effective_history_days = min(intent.history_days, 92)
-        effective_history_days = max(effective_history_days, 30)  # 至少30天用于训练
+        # 历史天数：默认365天，使用 Archive API 支持超过92天的历史数据
+        effective_history_days = min(intent.history_days, 730)  # 最多2年
+        effective_history_days = max(effective_history_days, 30)  # 至少30天
 
         # 使用北京时区确保一致性
         BEIJING_TZ = ZoneInfo("Asia/Shanghai")
@@ -418,12 +428,18 @@ class StreamingTaskProcessor:
         news_task = asyncio.create_task(
             fetch_news_all(region_name, intent.history_days)
         )
-        rag_available = await check_rag_availability() if intent.enable_rag else False
+        # forecast 模式下强制启用 RAG（UI 始终显示研报来源区域）
+        effective_enable_rag = intent.enable_rag or intent.is_forecast
+        rag_available = await check_rag_availability() if effective_enable_rag else False
+        print(f"[RAG] enable_rag={intent.enable_rag}, is_forecast={intent.is_forecast}, effective={effective_enable_rag}, rag_available={rag_available}")
+        # 如果意图未提供 RAG 关键词，使用区域名作为 fallback
+        effective_rag_keywords = keywords.rag_keywords if keywords.rag_keywords else [region_name, "供电", "电力需求"]
+        print(f"[RAG] keywords={effective_rag_keywords}")
         rag_task = (
             asyncio.create_task(
-                fetch_rag_reports(self.rag_searcher, keywords.rag_keywords)
+                fetch_rag_reports(self.rag_searcher, effective_rag_keywords)
             )
-            if intent.enable_rag and rag_available
+            if effective_enable_rag and rag_available
             else None
         )
 
@@ -506,7 +522,7 @@ class StreamingTaskProcessor:
             other_results[1]
             if len(other_results) > 1
             and not isinstance(other_results[1], Exception)
-            and intent.enable_rag
+            and effective_enable_rag
             else []
         )
 
@@ -534,8 +550,22 @@ class StreamingTaskProcessor:
                 },
             )
 
+        print(f"[RAG] rag_sources count: {len(rag_sources)}")
         if rag_sources:
+            print(f"[RAG] First source: {rag_sources[0].filename} (score={rag_sources[0].score:.3f})")
+            rag_sources = await self._summarize_rag_sources(rag_sources, user_input)
             message.save_rag_sources(rag_sources)
+            await self._emit_event(
+                event_queue,
+                message,
+                {
+                    "type": "data",
+                    "data_type": "rag_sources",
+                    "data": [s.model_dump() for s in rag_sources],
+                },
+            )
+        else:
+            print(f"[RAG] No RAG sources found. rag_task was {'created' if rag_task else 'None (skipped)'}")
 
         # === 计算异常区域（在Step 3完成前，确保resume时能获取到）===
         print(
@@ -917,40 +947,27 @@ class StreamingTaskProcessor:
         )
         message.update_step_detail(5, "running", f"训练模型...")
 
-        prophet_params = await recommend_forecast_params(
-            self.sentiment_agent, influence_result or {}, features
-        )
+        # 使用意图中的预测天数（默认30天）
+        forecast_horizon = max(intent.forecast_horizon, 1)
 
-        # 计算预测天数
-        last_date = df["ds"].max().to_pydatetime()
-        # 确保last_date有时区信息
-        BEIJING_TZ = ZoneInfo("Asia/Shanghai")
-        if last_date.tzinfo is None:
-            last_date = last_date.replace(tzinfo=BEIJING_TZ)
-
-        target_date_from_start = last_date + timedelta(days=90)
-        # print(f"[ModelSelection] 目标日期从开始: {target_date_from_start}")
-        # 确保target_date_to_today也是timezone-aware的
-        target_date_to_today = datetime.now(BEIJING_TZ)
-        # print(f"[ModelSelection] 目标日期到今天: {target_date_to_today}")
-        target_date = max(target_date_from_start, target_date_to_today)
-        # print(f"[ModelSelection] 目标日期: {target_date}")
-        forecast_horizon = max((target_date - last_date).days, 1)
-        # print(f"[ModelSelection] 预测天数: {forecast_horizon}")
-
-        # 模型选择：Demo模式 - 为了轻量化展示，默认使用Prophet模型
-        # 跳过复杂的模型选择过程，直接使用Prophet
+        # 模型选择：默认使用基于历史同期数据的预测方法
+        # 该方法基于近2年同期数据平均，并根据天气差异调整
         user_specified_model = intent.forecast_model
 
-        # Demo模式：默认使用Prophet，跳过复杂的模型选择过程
+        # 模型显示名称映射
+        _MODEL_DISPLAY_NAMES = {
+            "historical_average": "电力预测模型",
+        }
+
+        # 默认使用历史同期预测方法
         if not user_specified_model or user_specified_model == "auto":
-            final_model = "prophet"
-            model_selection_reason = "Demo模式：使用Prophet模型进行预测（轻量化展示）"
+            final_model = "historical_average"
+            model_selection_reason = "基于近2年历史同期数据平均预测，并根据天气差异调整"
         else:
             # 用户指定了模型，使用用户指定的模型
             final_model = user_specified_model
             model_selection_reason = (
-                f"使用用户指定的 {user_specified_model.upper()} 模型"
+                f"使用用户指定的 {_MODEL_DISPLAY_NAMES.get(user_specified_model, user_specified_model.upper())} 模型"
             )
 
         # 发送模型选择事件（简化版）
@@ -975,15 +992,19 @@ class StreamingTaskProcessor:
         # 保存模型选择原因
         message.save_model_selection_reason(model_selection_reason)
 
-        message.update_step_detail(5, "running", f"训练 {final_model.upper()} 模型...")
+        display_model_name = _MODEL_DISPLAY_NAMES.get(final_model, final_model.upper())
+        message.update_step_detail(5, "running", f"训练 {display_model_name}...")
 
-        prophet_params = await recommend_forecast_params(
-            self.sentiment_agent, influence_result or {}, features
-        )
+        # 只有 Prophet 模型需要 LLM 推荐参数，其他模型跳过
+        prophet_params = {}
+        if final_model == "prophet":
+            prophet_params = await recommend_forecast_params(
+                self.sentiment_agent, influence_result or {}, features
+            )
 
         # 只对最终选定的模型调用一次 run_forecast
         forecast_result = await run_forecast(
-            df, final_model, max(forecast_horizon, 1), prophet_params
+            df, final_model, max(forecast_horizon, 1), prophet_params, weather_df, region_name
         )
 
         # 保存并发送预测结果（forecast_result 是 ForecastResult 对象）
@@ -1110,7 +1131,7 @@ class StreamingTaskProcessor:
             message,
             {"type": "step_complete", "step": 5, "data": {"metrics": metrics_dict}},
         )
-        message.update_step_detail(5, "completed", f"预测完成 ({metrics_info})")
+        message.update_step_detail(5, "completed", f"{display_model_name} 预测完成 ({metrics_info})")
 
         # 保存模型名称到 MessageData（使用最终选定的模型）
         message.save_model_name(final_model)
@@ -1433,7 +1454,17 @@ class StreamingTaskProcessor:
         message.save_conclusion(answer)
 
         if "rag" in results:
+            results["rag"] = await self._summarize_rag_sources(results["rag"], user_input)
             message.save_rag_sources(results["rag"])
+            await self._emit_event(
+                event_queue,
+                message,
+                {
+                    "type": "data",
+                    "data_type": "rag_sources",
+                    "data": [s.model_dump() for s in results["rag"]],
+                },
+            )
 
         await self._emit_event(
             event_queue,
@@ -1762,6 +1793,86 @@ class StreamingTaskProcessor:
         return full_content
 
     # ========== 辅助方法 ==========
+
+    async def _summarize_rag_sources(
+        self, rag_sources: list, user_query: str
+    ) -> list:
+        """用 LLM 批量总结 RAG 研报片段，将原始文本替换为精炼摘要"""
+        if not rag_sources:
+            return rag_sources
+
+        snippets_text = ""
+        for i, src in enumerate(rag_sources):
+            snippets_text += f"[{i+1}] 文件: {src.filename} | 第{src.page}页\n{src.content_snippet}\n\n"
+
+        prompt = f"""用户问题: {user_query}
+
+以下是从研报中检索到的原始文本片段，请为每个片段生成一段精炼的中文摘要（50-100字），提取核心观点和关键数据。
+
+{snippets_text}
+
+请严格按以下格式输出，每行一个摘要，以序号开头：
+1. 摘要内容
+2. 摘要内容
+..."""
+
+        try:
+            from openai import OpenAI
+            from app.core.config import settings
+
+            client = OpenAI(
+                api_key=settings.DEEPSEEK_API_KEY,
+                base_url="https://api.deepseek.com",
+            )
+            response = await asyncio.to_thread(
+                lambda: client.chat.completions.create(
+                    model="deepseek-chat",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "你是研报摘要助手，负责将研报原始文本提炼为简洁准确的摘要。只输出摘要，不要多余解释。",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    temperature=0.2,
+                    max_tokens=1000,
+                )
+            )
+
+            result = response.choices[0].message.content.strip()
+            lines = [
+                line.strip()
+                for line in result.split("\n")
+                if line.strip() and line.strip()[0].isdigit()
+            ]
+
+            for i, line in enumerate(lines):
+                if i < len(rag_sources):
+                    # 去掉序号前缀 "1. " "2. " 等
+                    summary = line.lstrip("0123456789.、).） ").strip()
+                    if summary:
+                        rag_sources[i].content_snippet = summary
+
+            print(f"[RAG] Summarized {len(lines)} snippets with LLM")
+        except Exception as e:
+            print(f"[RAG] LLM summarization failed, keeping raw snippets: {e}")
+
+        return rag_sources
+
+    def _find_last_region(self, session: Session) -> Optional[str]:
+        """从历史消息中查找上次使用的城市名称"""
+        try:
+            messages = session.get_all_messages()
+            # 从最新到最旧遍历
+            for msg in reversed(messages):
+                msg_data = msg.get()
+                if msg_data and msg_data.unified_intent:
+                    region = msg_data.unified_intent.region_name
+                    if region:
+                        return region
+        except Exception as e:
+            print(f"[Forecast] 查找历史城市失败: {e}")
+        return None
 
     def _update_stream_status(self, message: Message, status: str):
         """更新流式状态"""
