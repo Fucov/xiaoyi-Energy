@@ -597,6 +597,7 @@ class StreamingTaskProcessor:
             redis_client = get_redis()
             cache_key = f"power_zones_v3:{region_code}"
             cached_zones_json = None
+            trend_results = {}  # 初始化，避免缓存命中时 UnboundLocalError
 
             try:
                 cached_zones_json = redis_client.get(cache_key)
