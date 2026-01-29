@@ -97,7 +97,7 @@ data: {"type": "content", "content": {...}}
   "type": "content",
   "content": {
     "type": "chart",
-    "title": "历史供电量趋势",
+    "title": "历史价格趋势",
     "data": {
       "labels": ["2024-01-01", "2024-01-02", "2024-01-03", ...],
       "datasets": [
@@ -139,7 +139,7 @@ data: {"type": "content", "content": {...}}
   "type": "content",
   "content": {
     "type": "chart",
-    "title": "历史供电量趋势（365天）",
+    "title": "历史价格趋势（365天）",
     "data": {
       "labels": ["2024-01-01", "2024-01-02", ...],
       "datasets": [
@@ -319,17 +319,17 @@ data: {"type": "content", "content": {...}}
 ```typescript
 {
   "type": "chart",
-  "title": "供电量预测趋势图",  // 可选
+  "title": "价格预测趋势图",  // 可选
   "data": {
     "labels": ["01-01", "01-02", "01-03", ...],  // X轴标签（日期）
     "datasets": [
       {
-        "label": "历史供电量",
+        "label": "历史价格",
         "data": [1850, 1860, 1845, ...],  // 数据数组，长度需与labels一致
         "color": "#8b5cf6"  // 可选，线条颜色（十六进制）
       },
       {
-        "label": "预测供电量",
+        "label": "预测价格",
         "data": [null, null, ..., 1920, 1950, ...],  // 可以使用null表示不显示该点
         "color": "#06b6d4"
       }
@@ -351,17 +351,17 @@ data: {"type": "content", "content": {...}}
   "type": "content",
   "content": {
     "type": "chart",
-    "title": "供电量预测趋势图",
+    "title": "价格预测趋势图",
     "data": {
       "labels": ["12-01", "12-02", "12-03", "01-01", "01-02", "01-03"],
       "datasets": [
         {
-          "label": "历史供电量",
+          "label": "历史价格",
           "data": [1850, 1860, 1845, null, null, null],
           "color": "#8b5cf6"
         },
         {
-          "label": "预测供电量",
+          "label": "预测价格",
           "data": [null, null, null, 1920, 1950, 1980],
           "color": "#06b6d4"
         }
@@ -381,7 +381,7 @@ data: {"type": "content", "content": {...}}
 // 1. 首先发送时序数据（从 akshare 获取）
 data: {"type": "content", "content": {"type": "table", "title": "历史时序数据（最近20条）", "headers": ["日期", "收盘价", "成交量"], "rows": [...]}}
 
-data: {"type": "content", "content": {"type": "chart", "title": "历史供电量趋势（365天）", "data": {...}}}
+data: {"type": "content", "content": {"type": "chart", "title": "历史价格趋势（365天）", "data": {...}}}
 
 // 2. 开始执行预测步骤
 data: {"type": "step", "steps": [{"id": "1", "name": "数据获取与预处理", "status": "running", "message": "处理中..."}, ...]}
@@ -399,7 +399,7 @@ data: {"type": "content", "content": {"type": "text", "text": "好的！我已�
 
 data: {"type": "content", "content": {"type": "table", "title": "模型性能对比", "headers": [...], "rows": [...]}}
 
-data: {"type": "content", "content": {"type": "chart", "title": "供电量预测趋势图", "data": {...}}}
+data: {"type": "content", "content": {"type": "chart", "title": "价格预测趋势图", "data": {...}}}
 
 data: {"type": "content", "content": {"type": "text", "text": "**预测结论：**\n\n..."}}
 ```
@@ -478,7 +478,7 @@ async def chat_stream(request: ChatRequest):
             "type": "content",
             "content": {
                 "type": "chart",
-                "title": "历史供电量趋势",
+                "title": "历史价格趋势",
                 "data": {
                     "labels": ["2024-01-01", "2024-01-02", ...],  # 从 akshare 数据获取
                     "datasets": [
@@ -547,12 +547,12 @@ async def chat_stream(request: ChatRequest):
             "type": "content",
             "content": {
                 "type": "chart",
-                "title": "供电量预测趋势图",
+                "title": "价格预测趋势图",
                 "data": {
                     "labels": ["01-01", "01-02", "01-03"],
                     "datasets": [
                         {
-                            "label": "历史供电量",
+                            "label": "历史价格",
                             "data": [1850, 1860, 1845],
                             "color": "#8b5cf6"
                         }
