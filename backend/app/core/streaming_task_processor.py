@@ -609,6 +609,42 @@ class StreamingTaskProcessor:
                 all_segments = []
                 all_segments.extend(plr_segments)
 
+                # NEW: Add raw PLR segments to anomaly_zones format
+                for seg in plr_segments:
+                    # Determine sentiment/color
+                    sentiment = "neutral"
+                    direction = seg.get("direction", "").lower()
+
+                    if direction == "up":
+                        sentiment = "positive"
+                    elif direction == "down":
+                        sentiment = "negative"
+
+                    # Calculate return
+                    try:
+                        start_p = float(seg.get("startPrice", 0))
+                        end_p = float(seg.get("endPrice", 0))
+                        change_pct = (end_p - start_p) / start_p if start_p else 0
+                    except:
+                        change_pct = 0
+
+                    anomaly_zones.append(
+                        {
+                            "startDate": seg["startDate"],
+                            "endDate": seg["endDate"],
+                            "avg_return": change_pct,
+                            "avg_score": abs(change_pct) * 5,  # Lower score for raw
+                            "zone_type": "trend_segment",
+                            "method": "plr",
+                            "sentiment": sentiment,
+                            "summary": f"{direction.title()} ({change_pct * 100:.1f}%)",
+                            "description": f"Raw Trend from {seg['startDate']} to {seg['endDate']}",
+                            "direction": direction,
+                            "startPrice": seg.get("startPrice"),
+                            "endPrice": seg.get("endPrice"),
+                        }
+                    )
+
                 # NEW: Generate Semantic Broad Regimes (Merged PLR)
                 # This creates broad "Event Flow" phases
                 semantic_raw = trend_service.process_semantic_regimes(

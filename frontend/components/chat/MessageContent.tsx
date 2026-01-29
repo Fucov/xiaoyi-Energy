@@ -304,97 +304,6 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // 异常区悬浮状态
   const [activeZone, setActiveZone] = useState<any>(null)
 
-  // === Custom Tooltip for Event Flow ===
-  const CustomTooltip = ({ active, payload, label }: any) => {
-    if (!active || !payload || !payload.length) return null;
-
-    const date = label;
-    // Find component zone that covers this date
-    // Use semanticRegimes if active, else visibleZones
-    const zones = useSemanticRegimes ? semanticRegimes : visibleZones;
-    const activeZone = zones.find((z: any) => date >= z.startDate && date <= z.endDate);
-
-    if (!activeZone) {
-      // Fallback to simple point tooltip
-      const point = payload[0].payload;
-      return (
-        <div className="bg-gray-900/95 border border-white/10 rounded-lg p-3 shadow-xl backdrop-blur-md min-w-[200px]">
-          <div className="text-gray-400 text-xs mb-1">{date}</div>
-          <div className="flex justify-between items-center">
-            <span className="text-gray-200">价格</span>
-            <span className="font-mono text-white font-bold">{Number(point.y || point.close).toFixed(2)}</span>
-          </div>
-        </div>
-      );
-    }
-
-    // Zone Tooltip
-    // Fix: Revert colors to A-share style (Red=Up, Green=Down)
-    const isPositive = (activeZone.avg_return || 0) >= 0;
-    const color = isPositive ? '#ef4444' : '#10b981';
-    const bgColor = isPositive ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)';
-    const borderColor = isPositive ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)';
-
-    return (
-      <div className="bg-gray-900/95 border border-white/10 rounded-lg shadow-xl backdrop-blur-md max-w-sm overflow-hidden text-sm">
-        {/* Header */}
-        <div
-          className="flex justify-between items-center px-3 py-2 border-b"
-          style={{
-            backgroundColor: bgColor,
-            borderColor: borderColor
-          }}
-        >
-          <div className="flex items-center gap-2">
-            <span className={`font-bold font-mono ${isPositive ? 'text-red-400' : 'text-green-400'}`}>
-              {(activeZone.avg_return * 100).toFixed(1)}%
-            </span>
-            <span className="text-xs text-white/50">
-              {activeZone.startDate} ~ {activeZone.endDate}
-            </span>
-          </div>
-        </div>
-
-        {/* Event List */}
-        <div className="p-3">
-          <div className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1">
-            <div className="w-1 h-1 rounded-full bg-purple-500"></div>
-            EVENT FLOW
-          </div>
-
-          <div className="space-y-3">
-            {/* If we have specific sub-events in 'events' field */}
-            {activeZone.events && activeZone.events.length > 0 ? (
-              activeZone.events.map((evt: any, idx: number) => {
-                const evtReturn = ((evt.endPrice - evt.startPrice) / evt.startPrice);
-                const isEvtPos = evtReturn >= 0;
-                return (
-                  <div key={idx} className="relative pl-3 border-l border-gray-700">
-                    <div className="absolute -left-[3px] top-1.5 w-1.5 h-1.5 rounded-full bg-gray-600"></div>
-                    <div className="flex justify-between items-start">
-                      <div className="text-gray-400 text-xs mb-0.5">{evt.startDate}</div>
-                      <span className={`text-[10px] px-1 rounded ${isEvtPos ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
-                        {(evtReturn * 100).toFixed(1)}%
-                      </span>
-                    </div>
-                    <div className="text-gray-300 text-xs leading-relaxed">
-                      {evt.summary || evt.description || "区间波动"}
-                    </div>
-                  </div>
-                )
-              })
-            ) : (
-              <div className="text-gray-400 text-xs">
-                {activeZone.summary || activeZone.description || "无详细事件数据"}
-              </div>
-            )}
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-
   // Algorithm Selection State - Default to 'plr'
   const [trendAlgo, setTrendAlgo] = useState<string>('plr');
   const [anomalyAlgo, setAnomalyAlgo] = useState<string>('all');
@@ -644,8 +553,6 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   const semanticRegimes = useMemo(() => {
     // 1. If Backend already provided Semantic Zones, use them directly!
     // This supports "Event Flow" feature and robust backend merging
-    // 1. If Backend already provided Semantic Zones, use them directly!
-    // This supports "Event Flow" feature and robust backend merging
     if (semantic_zones.length > 0 || (prediction_semantic_zones && prediction_semantic_zones.length > 0)) {
       // 1. Raw zones
       let historicalZones = semantic_zones.map((z: any) => ({ ...z, isPrediction: false }));
@@ -718,7 +625,6 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         ...predictionZones
       ];
     }
-
     // 2. Fallback: Frontend Calculation (for legacy cache or other algos)
     if (!anomalyZones || anomalyZones.length === 0) return [];
     if (chartData.length === 0) return [];
@@ -887,6 +793,146 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       };
     });
   }, [anomalyZones, chartData, trendAlgo, anomalies, data.datasets, semantic_zones, prediction_semantic_zones, predictionStartDay]);
+
+  // --- End Semantic Regimes ---
+
+  // Filter Logic
+  // @ts-ignore
+  const visibleZones = (anomalyZones || []).filter((z: any) => {
+    if (trendAlgo === 'all') return true;
+    // Allow 'plr_prediction' when 'plr' is selected
+    if (trendAlgo === 'plr' && z.method === 'plr_prediction') return true;
+    return (z.method || 'plr') === trendAlgo;
+  });
+
+  // === Optimized Zone Lookup ===
+  // Create a map of date -> zone for O(1) lookup to prevent lag
+  const zoneMap = useMemo(() => {
+    const map = new Map();
+    const zones = useSemanticRegimes ? semanticRegimes : visibleZones; // Use calculated semanticRegimes or visibleZones
+    if (!zones) return map;
+
+    zones.forEach((z: any) => {
+      // Expand date range to individual dates
+      // Simple approach: Iterate from start to end date
+      let curr = new Date(z.startDate);
+      const end = new Date(z.endDate);
+      while (curr <= end) {
+        const dateStr = curr.toISOString().split('T')[0];
+        // If multiple zones overlap, last one wins (usually fine, or we can store list)
+        map.set(dateStr, z);
+        curr.setDate(curr.getDate() + 1);
+      }
+    });
+    return map;
+  }, [useSemanticRegimes, semanticRegimes, visibleZones]);
+
+
+  // === Custom Tooltip for Event Flow ===
+  const CustomTooltip = ({ active, payload, label }: any) => {
+    // If not active or no payload, don't render anything
+    if (!active || !payload || !payload.length) return null;
+
+    // Use memoized map for O(1) lookup
+    const date = label;
+    let currentZone = zoneMap.get(date);
+
+    // Fallback: if map failed (e.g. date string format mismatch), try find() but ONLY if map is empty?
+    // No, keep it fast. If map missing, maybe no zone.
+
+    if (!currentZone) {
+      const activeZoneId = activeZone?.startDate + activeZone?.endDate; // From hover state
+      if (activeZone && activeZoneId) {
+        // Check if activeZone actually covers this date?
+        // Or just trust the hover.
+        // Let's trust hover if date lookup failed.
+        currentZone = activeZone;
+      }
+    }
+
+
+    if (!currentZone) {
+      const point = payload[0].payload;
+      return (
+        <div className="bg-gray-900/95 border border-white/10 rounded-lg p-3 shadow-xl backdrop-blur-md min-w-[200px]">
+          <div className="text-gray-400 text-xs mb-1">{label}</div>
+          <div className="flex justify-between items-center">
+            <span className="text-gray-200">价格</span>
+            <span className="font-mono text-white font-bold">{Number(point.y || point.close).toFixed(2)}</span>
+          </div>
+        </div>
+      )
+    }
+
+    // Zone Tooltip Logic
+    const isPositive = (currentZone.avg_return || 0) >= 0;
+    const color = isPositive ? '#ef4444' : '#10b981';
+    const bgColor = isPositive ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)';
+    const borderColor = isPositive ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)';
+
+    return (
+      <div className="bg-gray-900/95 border border-white/10 rounded-lg shadow-xl backdrop-blur-md max-w-sm overflow-hidden text-sm">
+        {/* Header */}
+        <div
+          className="flex justify-between items-center px-3 py-2 border-b"
+          style={{
+            backgroundColor: bgColor,
+            borderColor: borderColor
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span className={`font-bold font-mono ${isPositive ? 'text-red-400' : 'text-green-400'}`}>
+              {/* FIX: Ensure avg_return exists before formatting, or use change_pct */}
+              {((currentZone.avg_return || currentZone.change_pct || 0) * 100).toFixed(1)}%
+            </span>
+            <span className="text-xs text-white/50">
+              {currentZone.startDate} ~ {currentZone.endDate}
+            </span>
+          </div>
+        </div>
+
+        {/* Event List */}
+        <div className="p-3">
+          <div className="text-xs font-bold text-gray-500 mb-2 flex items-center gap-1">
+            <div className="w-1 h-1 rounded-full bg-purple-500"></div>
+            EVENT FLOW
+          </div>
+
+          <div className="space-y-3">
+            {/* Logic to show events: prefer 'events' array, else show description */}
+            {/* Ensure events is an array and has length */}
+            {currentZone.events && Array.isArray(currentZone.events) && currentZone.events.length > 0 ? (
+              currentZone.events.map((evt: any, idx: number) => {
+                const startP = evt.startPrice || 0;
+                const endP = evt.endPrice || 0;
+                const evtReturn = startP ? ((endP - startP) / startP) : (evt.avg_return || 0);
+                const isEvtPos = evtReturn >= 0;
+
+                return (
+                  <div key={idx} className="relative pl-3 border-l border-gray-700">
+                    <div className="absolute -left-[3px] top-1.5 w-1.5 h-1.5 rounded-full bg-gray-600"></div>
+                    <div className="flex justify-between items-start">
+                      <div className="text-gray-400 text-xs mb-0.5">{evt.startDate}</div>
+                      <span className={`text-[10px] px-1 rounded ${isEvtPos ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
+                        {(evtReturn * 100).toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="text-gray-300 text-xs leading-relaxed">
+                      {evt.event_summary || evt.summary || evt.description || "区间波动"}
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <div className="text-gray-400 text-xs">
+                {currentZone.event_summary || currentZone.summary || currentZone.description || "无详细事件数据"}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // --- End Semantic Regimes ---
 
@@ -1118,14 +1164,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     setViewEndIndex(chartData.length - 1)
   }, [chartData.length])
 
-  // Filter Logic
-  // @ts-ignore
-  const visibleZones = (anomalyZones || []).filter((z: any) => {
-    if (trendAlgo === 'all') return true;
-    // Allow 'plr_prediction' when 'plr' is selected
-    if (trendAlgo === 'plr' && z.method === 'plr_prediction') return true;
-    return (z.method || 'plr') === trendAlgo;
-  });
+
 
   // Filter Anomalies
   // @ts-ignore
@@ -1289,11 +1328,11 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   onClick={(e) => { e.stopPropagation(); setActiveZone(regime); }}
                 >
                   <Label
-                    value={regime.totalChange || (regime.avg_return ? `${(regime.avg_return * 100).toFixed(1)}%` : '')}
-                    position="insideTop"
-                    fill={fill}
-                    fontSize={10}
-                    className="font-mono font-bold opacity-70"
+                    value={`${((regime.avg_return || regime.change_pct || 0) * 100).toFixed(2)}%`}
+                    position="top"
+                    fill={isPositive ? '#ef4444' : '#22c55e'}
+                    fontSize={12}
+                    fontWeight="bold"
                   />
                 </ReferenceArea>
               );
@@ -1346,47 +1385,56 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               // 使用唯一key：startDate-endDate组合
               const uniqueKey = `zone-${zone.startDate}-${zone.endDate}-${idx}`
 
-              // FIX: 单日zones需要扩展宽度，否则ReferenceArea不显示
-              let displayStartDate = zone.startDate
-              if (zone.startDate === zone.endDate) {
-                const startIdx = chartData.findIndex((d: any) => d.name === zone.startDate)
-                if (startIdx > 0) {
-                  displayStartDate = chartData[startIdx - 1].name
+              // FIX: Ensure minimum width for ALL zones to guarantee visibility
+              let displayStartDate = zone.startDate;
+              let displayEndDate = zone.endDate;
+
+              const startIdx = chartData.findIndex((d: any) => d.name === displayStartDate);
+              const endIdx = chartData.findIndex((d: any) => d.name === displayEndDate);
+
+              if (startIdx >= 0) {
+                // For single point or very narrow intervals, expand slightly
+                if (startIdx === endIdx) {
+                  if (startIdx > 0) displayStartDate = chartData[startIdx - 1].name;
+                  else if (startIdx < chartData.length - 1) displayEndDate = chartData[startIdx + 1].name;
+                } else if (startIdx + 1 === endIdx) {
+                  // If adjacent points (e.g. idx 5 and 6), ReferenceArea might be thin between them.
+                  // Expand end to ensure it covers the gap.
+                  // Actually Recharts ReferenceArea covers from x1 to x2.
+                  // If x1=June1 and x2=June2, it covers the interval.
+                  // But let's act robustly.
                 }
               }
-
 
               // Prediction Logic
               const isPrediction = zone.is_prediction || zone.zone_type === 'prediction_regime';
 
               // Styling Logic
-              // If it's prediction, use fill even in raw mode (User request: "Prediction area only has semantic intervals... canceling, only historical points are covered")
-              // Actually, user wants prediction area to exist.
-              // So for prediction zones, we ALWAYS use fill (maybe lighter) and dashed stroke
-
               let fill = zoneColor.fill;
               let stroke = zoneColor.stroke;
               let fillOpacity = impact * 0.8;
               let strokeDasharray = isCalm ? '5 5' : undefined;
+              let strokeOpacity = impact;
+              let strokeWidth = 1;
 
               if (isPrediction) {
-                // User request: "Cancel (Raw Mode), then only historical points be covered by raw intervals"
-                // So we do NOT show prediction zones in Raw Mode.
                 return null;
               } else {
-                // Normal Raw styling (no fill)
                 fill = 'none';
+                strokeOpacity = 1;
+                strokeWidth = 2; // Thicker stroke for visibility
               }
 
               return (
                 <ReferenceArea
                   key={uniqueKey}
                   x1={displayStartDate}
-                  x2={zone.endDate}
+                  x2={displayEndDate}
                   fill={fill}
                   fillOpacity={fillOpacity}
                   stroke={stroke}
-                  strokeOpacity={impact}
+                  strokeOpacity={strokeOpacity}
+                  strokeWidth={strokeWidth}
                   strokeDasharray={strokeDasharray}
                   onMouseEnter={() => setActiveZone(zone)}
                   onMouseLeave={() => setActiveZone(null)}
@@ -1522,9 +1570,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
             {/* 异常点调试日志 (控制台可见) */}
             {(() => {
-              console.log("[MessageContent] Anomalies Prop:", anomalies?.length || 0);
-              console.log("[MessageContent] Visible Anomalies:", visibleAnomalies.length);
-              console.log("[MessageContent] Prediction Zones:", prediction_semantic_zones?.length || 0);
+              // console.log("[MessageContent] Anomalies Prop:", anomalies?.length || 0);
+              // console.log("[MessageContent] Visible Anomalies:", visibleAnomalies.length);
+              // console.log("[MessageContent] Prediction Zones:", prediction_semantic_zones?.length || 0);
               if (anomalies && anomalies.length > 0 && visibleAnomalies.length === 0) {
                 console.warn("[MessageContent] WARNING: Anomalies exist but none are visible! Check date format match.",
                   "Anomaly Sample:", anomalies[0],
