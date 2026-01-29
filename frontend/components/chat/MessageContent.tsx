@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useRef, useCallback, useEffect } from 'react'
+import React, { useState, useMemo, useRef, useCallback, useEffect, Fragment } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -26,9 +26,12 @@ function preprocessMarkdown(text: string): string {
   // 全角归一化
   processed = processed.replace(/＋/g, '+').replace(/－/g, '-')
 
-  // 🚀 直接把 **+3.70%** 变成 <strong>+3.70%</strong>
+  // 处理带正负号的数字加粗，包括复杂格式如 **-0.09元(-0.82%)**
+  // 匹配格式：**+/-数字(单位)(括号内容)**
+  // 例如：**-0.09元(-0.82%)** 或 **+0.52元(+4.73%)** 或 **+3.70%**
+  // 使用更通用的匹配：匹配 ** 之间以 + 或 - 开头的所有内容（直到下一个 **）
   processed = processed.replace(
-    /\*\*\s*([+-]\d+(?:\.\d+)?[%元]?)\s*\*\*/g,
+    /\*\*\s*([+-][^*]+?)\s*\*\*/g,
     '<strong>$1</strong>'
   )
 
@@ -86,28 +89,28 @@ export function MessageContent({ content }: MessageContentProps) {
             ),
             // 表格
             table: ({ children }) => (
-              <div className="overflow-x-auto my-3">
-                <table className="w-full border-collapse border border-white/10">
+              <div className="overflow-x-auto my-3 rounded-lg border border-white/10 bg-dark-800/30 shadow-sm">
+                <table className="w-full border-collapse">
                   {children}
                 </table>
               </div>
             ),
             thead: ({ children }) => (
-              <thead className="bg-dark-700/50">{children}</thead>
+              <thead className="bg-gradient-to-r from-dark-700/50 to-dark-800/50 border-b border-white/10">{children}</thead>
             ),
             tbody: ({ children }) => (
               <tbody>{children}</tbody>
             ),
             tr: ({ children }) => (
-              <tr className="border-b border-white/5 hover:bg-dark-600/30 transition-colors">{children}</tr>
+              <tr className="border-b border-white/5 hover:bg-gradient-to-r hover:from-dark-700/30 hover:to-dark-800/30 transition-all duration-150 group">{children}</tr>
             ),
             th: ({ children }) => (
-              <th className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider border border-white/10">
+              <th className="px-4 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider">
                 {children}
               </th>
             ),
             td: ({ children }) => (
-              <td className="px-4 py-2 text-sm text-gray-300 border border-white/5">
+              <td className="px-4 py-3 text-sm text-gray-300 group-hover:text-gray-200 transition-colors">
                 {children}
               </td>
             ),
@@ -224,41 +227,45 @@ export function MessageContent({ content }: MessageContentProps) {
     }
 
     return (
-      <div className="mt-2 overflow-x-auto max-h-80 overflow-y-auto">
+      <div className="mt-2 overflow-x-auto rounded-lg border border-white/10 bg-dark-800/30">
         {title && (
-          <h4 className="text-sm font-medium text-gray-300 mb-3">{title}</h4>
+          <div className="px-4 pt-3 pb-2 border-b border-white/10">
+            <h4 className="text-sm font-semibold text-gray-200">{title}</h4>
+          </div>
         )}
-        <table className="w-full border-collapse">
-          <thead>
-            <tr className="border-b border-white/10">
-              {headers.map((header, index) => (
-                <th
-                  key={index}
-                  className="px-4 py-2 text-left text-xs font-medium text-gray-400 uppercase tracking-wider"
-                >
-                  {header}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row, rowIndex) => (
-              <tr
-                key={rowIndex}
-                className="border-b border-white/5 hover:bg-dark-600/30 transition-colors"
-              >
-                {row.map((cell, cellIndex) => (
-                  <td
-                    key={cellIndex}
-                    className="px-4 py-2 text-sm text-gray-300"
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse">
+            <thead>
+              <tr className="bg-gradient-to-r from-dark-700/50 to-dark-800/50 border-b border-white/10">
+                {headers.map((header, index) => (
+                  <th
+                    key={index}
+                    className="px-4 py-3 text-left text-xs font-semibold text-gray-300 uppercase tracking-wider"
                   >
-                    {renderCell(cell, cellIndex)}
-                  </td>
+                    {header}
+                  </th>
                 ))}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {rows.map((row, rowIndex) => (
+                <tr
+                  key={rowIndex}
+                  className="border-b border-white/5 hover:bg-gradient-to-r hover:from-dark-700/30 hover:to-dark-800/30 transition-all duration-150 group"
+                >
+                  {row.map((cell, cellIndex) => (
+                    <td
+                      key={cellIndex}
+                      className="px-4 py-3 text-sm text-gray-300 group-hover:text-gray-200 transition-colors"
+                    >
+                      {renderCell(cell, cellIndex)}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </div>
     )
   }
@@ -272,7 +279,7 @@ export function MessageContent({ content }: MessageContentProps) {
 
 // 交互式图表组件，支持鼠标拖拽平移、滚轮缩放、异常区高亮、新闻侧边栏
 function InteractiveChart({ content }: { content: ChartContent }) {
-  const { title, data, chartType = 'line', sessionId, messageId, originalData, anomalyZones = [], ticker } = content
+  const { title, data, chartType = 'line', sessionId, messageId, originalData, anomalyZones = [], ticker, changePoints = [] } = content
 
   // 新闻侧边栏状态
   const [newsSidebarOpen, setNewsSidebarOpen] = useState(false)
@@ -282,6 +289,20 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
   // 异常区悬浮状态
   const [activeZone, setActiveZone] = useState<any>(null)
+  // 变点悬浮状态
+  const [activeChangePoint, setActiveChangePoint] = useState<any>(null)
+
+  // Trend Algorithm State
+  const [trendAlgo, setTrendAlgo] = useState('semantic')
+
+  // Filter Zones for Chart
+  const visibleZones = useMemo(() => {
+    if (!anomalyZones || anomalyZones.length === 0) return [];
+    return anomalyZones.filter((z: any) => {
+      if (trendAlgo === 'all') return true;
+      return (z.method || 'plr') === trendAlgo || (trendAlgo === 'semantic' && z.zone_type === 'semantic_regime');
+    });
+  }, [anomalyZones, trendAlgo]);
 
   // 从URL恢复新闻侧栏状态（仅在ticker可用时）
   useEffect(() => {
@@ -385,7 +406,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
           return {
             name: date,
-            历史价格: histPoint?.value ?? null,
+            历史供电量: histPoint?.value ?? null,
             实际值: truthPoint?.value ?? null,
             回测预测: predPoint?.value ?? null
           }
@@ -714,7 +735,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     setViewEndIndex(chartData.length - 1)
   }, [chartData.length])
 
-  // 如果标题包含"预测"，则不显示（因为外层已有"价格走势分析"标题）
+  // 如果标题包含"预测"，则不显示（因为外层已有"供电需求预测"标题）
   const shouldShowTitle = title && !title.includes('预测')
 
   return (
@@ -723,14 +744,33 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       {hasBacktestSupport && (
         <BacktestControls
           isLoading={backtest.isLoading}
-          mae={backtest.metrics?.mae ?? null}
+          mae={backtest.metrics?.mape ?? null}
           onReset={backtest.resetBacktest}
         />
       )}
       <div className="flex items-center justify-between mb-3">
-        {shouldShowTitle && (
-          <h4 className="text-sm font-medium text-gray-300">{title}</h4>
-        )}
+        <div className="flex items-center gap-2">
+          {shouldShowTitle && (
+            <h4 className="text-sm font-medium text-gray-300">{title}</h4>
+          )}
+          {/* Trend Algo Selector for Chart */}
+          {anomalyZones && anomalyZones.length > 0 && (
+            <div className="flex items-center bg-dark-600/50 rounded p-0.5 border border-gray-700/50">
+              <button
+                onClick={() => setTrendAlgo('plr')}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-all ${trendAlgo === 'plr' ? 'bg-violet-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                Raw
+              </button>
+              <button
+                onClick={() => setTrendAlgo('semantic')}
+                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-all ${trendAlgo === 'semantic' ? 'bg-violet-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
+              >
+                Semantic
+              </button>
+            </div>
+          )}
+        </div>
         <div className="flex items-center gap-2">
           {isZoomed && (
             <>
@@ -762,9 +802,25 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           {anomalyZones.length} 个重点区域
         </div>
       )}
+      {/* 变点详情提示 */}
+      {activeChangePoint && (
+        <div className="absolute top-10 right-2 bg-gray-900/90 border border-amber-500/30 p-2 rounded shadow-lg max-w-xs z-20 backdrop-blur-sm">
+          <div className="text-amber-400 text-xs font-bold mb-1 flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+            突变点分析 ({activeChangePoint.date})
+          </div>
+          <div className="text-gray-200 text-xs leading-relaxed">
+            {activeChangePoint.reason}
+          </div>
+          <div className="mt-1 text-gray-500 text-[10px] flex justify-between gap-4">
+            <span>幅度: {activeChangePoint.magnitude ? Number(activeChangePoint.magnitude).toFixed(2) : '-'}</span>
+            <span>类型: {activeChangePoint.type === 'shift' ? '水平偏移' : '趋势变化'}</span>
+          </div>
+        </div>
+      )}
       <div
         ref={chartContainerRef}
-        className="w-full h-64 relative"
+        className="w-full h-[512px] relative"
         onMouseDown={handleMouseDown}
         style={{
           cursor: isDragging ? 'grabbing' : 'grab',
@@ -775,7 +831,6 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           <LineChart
             data={displayData}
             margin={{ top: 5, right: 10, left: 0, bottom: 20 }}
-            onClick={handleChartClick}
           >
             <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4a" />
             <XAxis
@@ -791,6 +846,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               style={{ fontSize: '12px' }}
               domain={yAxisDomain}
               allowDataOverflow={false}
+              label={{ value: '供电量(MW)', angle: -90, position: 'insideLeft' }}
               tickFormatter={(value) => {
                 // 格式化 Y 轴刻度标签，处理大数值
                 if (isNaN(value) || !isFinite(value)) {
@@ -824,12 +880,13 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               wrapperStyle={{ fontSize: '12px' }}
             />
             {/* 异常区域与悬浮提示 - Bloomberg风格 */}
-            {anomalyZones && anomalyZones.map((zone: any, idx: number) => {
+            {visibleZones && visibleZones.map((zone: any, idx: number) => {
               // A股配色：红涨绿跌
               const isPositive = (zone.avg_return || 0) >= 0
+              const isRaw = trendAlgo === 'plr'
               const zoneColor = isPositive
-                ? { fill: 'rgba(239, 68, 68, 0.04)', stroke: '#ef4444' }  // 红色=上涨
-                : { fill: 'rgba(34, 197, 94, 0.04)', stroke: '#22c55e' }   // 绿色=下跌
+                ? { fill: isRaw ? 'none' : 'rgba(239, 68, 68, 0.15)', stroke: '#ef4444' }  // 红色=上涨
+                : { fill: isRaw ? 'none' : 'rgba(34, 197, 94, 0.15)', stroke: '#22c55e' }   // 绿色=下跌
 
               const impact = zone.impact || 0.5
               const isCalm = zone.zone_type === 'calm'
@@ -863,6 +920,37 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                 />
               )
             })}
+            {/* 变点检测标记 */}
+            {changePoints && changePoints.map((point: any, idx: number) => (
+              <Fragment key={`cp-group-${point.date}-${idx}`}>
+                {/* 视觉层：红色虚线 */}
+                <ReferenceLine
+                  x={point.date}
+                  stroke="#ef4444" // 红色，更醒目
+                  strokeDasharray="4 4"
+                  strokeWidth={2} // 视觉上保持精细
+                  label={{
+                    value: '⚠️', // 使用emoji作为醒目标记
+                    position: 'insideTop',
+                    fill: '#ef4444',
+                    fontSize: 16,
+                    offset: 0,
+                    cursor: 'pointer'
+                  }}
+                  style={{ pointerEvents: 'none', zIndex: 10 }} // 视觉层不响应事件，防遮挡
+                />
+                {/* 交互层：透明宽线（热区） */}
+                <ReferenceLine
+                  x={point.date}
+                  stroke="#ef4444"
+                  strokeOpacity={0} // 完全透明
+                  strokeWidth={20} // 20px 宽度的热区
+                  onMouseEnter={() => setActiveChangePoint(point)}
+                  onMouseLeave={() => setActiveChangePoint(null)}
+                  style={{ cursor: 'pointer', zIndex: 20 }}
+                />
+              </Fragment>
+            ))}
             {/* 鼠标跟随的水平参考线 */}
             {mouseY !== null && plotAreaBounds && (() => {
               // mouseY 已经是相对于绘图区域顶部的坐标
@@ -911,14 +999,14 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               <>
                 <Line
                   type="monotone"
-                  dataKey="历史价格"
+                  dataKey="历史供电量"
                   stroke="#a855f7"
                   strokeWidth={2}
                   dot={{ r: 3 }}
                   activeDot={{ r: 5 }}
                   connectNulls={false}
                   isAnimationActive={false}
-                  name="历史价格"
+                  name="历史供电量(MW)"
                 />
                 <Line
                   type="monotone"
@@ -930,7 +1018,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   activeDot={{ r: 4 }}
                   connectNulls={false}
                   isAnimationActive={false}
-                  name="实际值 (Ground Truth)"
+                  name="实际供电量(MW)"
                 />
                 <Line
                   type="monotone"
@@ -941,7 +1029,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   activeDot={{ r: 5 }}
                   connectNulls={false}
                   isAnimationActive={false}
-                  name="回测预测"
+                  name="回测预测(MW)"
                 />
               </>
             ) : (
@@ -964,8 +1052,8 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         </ResponsiveContainer>
 
         {/* X 轴滑块 - 明显的滑块圆点 */}
-        {((hasBacktestSupport && originalData && originalData.length > 60) || (data.datasets.some(d => d.label === '历史价格') && data.datasets.some(d => d.label === '预测价格'))) && plotAreaBounds && (() => {
-          // 计算分割点：拖拽时使用临时日期，否则使用回测分割点或历史价格和预测价格的分界点
+        {((hasBacktestSupport && originalData && originalData.length > 60) || (data.datasets.some(d => d.label === '历史供电量') && data.datasets.some(d => d.label === '预测供电量'))) && plotAreaBounds && (() => {
+          // 计算分割点：拖拽时使用临时日期，否则使用回测分割点或历史供电量和预测供电量的分界点
           let splitDate = isDraggingSlider && tempSplitDate ? tempSplitDate : backtest.splitDate
           let splitIndexInChart = -1
 
@@ -973,23 +1061,23 @@ function InteractiveChart({ content }: { content: ChartContent }) {
             // 回测模式：使用指定的分割点
             splitIndexInChart = chartData.findIndex(item => item.name === splitDate)
           } else {
-            // 正常模式：查找历史价格和预测价格的分界点
-            // 找到最后一个有历史价格值的点，下一个点就是预测价格的起点
+            // 正常模式：查找历史供电量和预测供电量的分界点
+            // 找到最后一个有历史供电量值的点，下一个点就是预测供电量的起点
             for (let i = chartData.length - 1; i >= 0; i--) {
               const item = chartData[i]
-              const historicalPrice = (item as any)['历史价格']
-              if (historicalPrice !== null && historicalPrice !== undefined) {
-                // 找到下一个有预测价格的点作为分界点
+              const historicalPower = (item as any)['历史供电量']
+              if (historicalPower !== null && historicalPower !== undefined) {
+                // 找到下一个有预测供电量的点作为分界点
                 if (i + 1 < chartData.length) {
                   const nextItem = chartData[i + 1]
-                  const predictedPrice = (nextItem as any)['预测价格']
-                  if (predictedPrice !== null && predictedPrice !== undefined) {
+                  const predictedPower = (nextItem as any)['预测供电量']
+                  if (predictedPower !== null && predictedPower !== undefined) {
                     splitIndexInChart = i + 1
                     splitDate = nextItem.name as string
                     break
                   }
                 }
-                // 如果没有找到预测价格，使用当前点
+                // 如果没有找到预测供电量，使用当前点
                 if (splitIndexInChart < 0) {
                   splitIndexInChart = i
                   splitDate = item.name as string
@@ -1232,7 +1320,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                         px-4 py-2.5 rounded-lg shadow-2xl max-w-lg
                         animate-in fade-in-0 slide-in-from-top-2 duration-200">
             <div className="flex items-center gap-3">
-              {/* 高影响力标记 */}
+              {/* 高相关性标记 */}
               {(activeZone.impact || 0) > 0.7 && (
                 <span className="text-lg animate-pulse">✨</span>
               )}
@@ -1281,17 +1369,6 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         )}
       </AnimatePresence>
 
-      {/* 新闻侧边栏 */}
-      {ticker && (
-        <ChartNewsSidebar
-          isOpen={newsSidebarOpen}
-          onClose={handleCloseSidebar}
-          news={newsData}
-          loading={newsLoading}
-          selectedDate={selectedDate}
-          ticker={ticker}
-        />
-      )}
     </div>
   )
 }

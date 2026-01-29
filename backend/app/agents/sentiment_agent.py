@@ -15,22 +15,22 @@ class SentimentAgent(BaseAgent):
 
     DEFAULT_TEMPERATURE = 0.2
 
-    SYSTEM_PROMPT = """你是金融情绪分析专家。分析以下股票新闻，给出情绪判断和分析说明。
+    SYSTEM_PROMPT = """你是电力需求影响因素分析专家。分析以下天气/电力相关新闻，给出对供电需求的影响判断和分析说明。
 
 分析要点:
-- 关注利好/利空消息的比例和重要性
-- 考虑政策、业绩、市场情绪等因素
+- 关注极端天气事件（寒潮、高温、暴雨等）对供电需求的影响
+- 考虑季节性因素、政策因素、基础设施等因素
 - 提取最重要的3-5条新闻摘要
 
 输出格式：
-第一行输出情绪得分（-1到1之间的小数，负面为负，正面为正），格式：SCORE:0.35
+第一行输出影响得分（-1到1之间的小数，负面对需求不利，正面对需求有利），格式：SCORE:0.35
 第二行空行
 之后输出分析说明（50-100字），包含：
-1. 整体情绪判断（正面/中性/负面）
-2. 主要影响因素
+1. 整体影响判断（正面/中性/负面）
+2. 主要影响因素（天气事件、政策等）
 3. 关键事件摘要"""
 
-    PARAMS_SYSTEM_PROMPT = """你是时序预测专家。根据股票特征和情绪分析推荐 Prophet 模型参数。
+    PARAMS_SYSTEM_PROMPT = """你是时序预测专家。根据电力需求特征和影响因素分析推荐 Prophet 模型参数。
 
 参数说明:
 - changepoint_prior_scale: 趋势变化敏感度 (0.001-0.5)，默认 0.05
@@ -48,9 +48,7 @@ class SentimentAgent(BaseAgent):
 只返回 JSON"""
 
     def analyze_streaming(
-        self,
-        news_items: list,
-        on_chunk: Callable[[str], None]
+        self, news_items: list, on_chunk: Callable[[str], None]
     ) -> Dict[str, Any]:
         """
         流式分析新闻情绪
@@ -71,8 +69,7 @@ class SentimentAgent(BaseAgent):
         news_text = self._format_news_items(news_items)
 
         messages = self.build_messages(
-            user_content=f"新闻列表:\n{news_text}",
-            system_prompt=self.SYSTEM_PROMPT
+            user_content=f"新闻列表:\n{news_text}", system_prompt=self.SYSTEM_PROMPT
         )
 
         # 流式调用
@@ -108,22 +105,12 @@ class SentimentAgent(BaseAgent):
                 on_chunk(chunk)
                 description_buffer += chunk
 
-        self.call_llm(
-            messages,
-            stream=True,
-            on_chunk=stream_handler,
-            fallback=""
-        )
+        self.call_llm(messages, stream=True, on_chunk=stream_handler, fallback="")
 
-        return {
-            "score": score,
-            "description": description_buffer.strip() or "中性情绪"
-        }
+        return {"score": score, "description": description_buffer.strip() or "中性情绪"}
 
     def recommend_params(
-        self,
-        sentiment_result: Dict[str, Any],
-        features: Dict[str, Any]
+        self, sentiment_result: Dict[str, Any], features: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         基于情绪分析和时序特征推荐 Prophet 参数
@@ -135,25 +122,24 @@ class SentimentAgent(BaseAgent):
         Returns:
             Prophet 参数
         """
-        user_prompt = f"""股票特征:
-- 趋势: {features.get('trend', '未知')}
-- 波动性: {features.get('volatility', '未知')}
-- 数据点数: {features.get('data_points', 0)}
+        user_prompt = f"""电力需求特征:
+- 趋势: {features.get("trend", "未知")}
+- 波动性: {features.get("volatility", "未知")}
+- 数据点数: {features.get("data_points", 0)}
 
 情绪分析:
-- 情绪得分: {sentiment_result.get('score', 0)}
-- 描述: {sentiment_result.get('description', '中性')}"""
+- 情绪得分: {sentiment_result.get("score", 0)}
+- 描述: {sentiment_result.get("description", "中性")}"""
 
         messages = self.build_messages(
-            user_content=user_prompt,
-            system_prompt=self.PARAMS_SYSTEM_PROMPT
+            user_content=user_prompt, system_prompt=self.PARAMS_SYSTEM_PROMPT
         )
 
         content = self.call_llm(
             messages,
             fallback=None,
             temperature=0.1,
-            response_format={"type": "json_object"}
+            response_format={"type": "json_object"},
         )
 
         if content is None:
@@ -177,5 +163,5 @@ class SentimentAgent(BaseAgent):
             "changepoint_prior_scale": 0.05,
             "seasonality_prior_scale": 10,
             "changepoint_range": 0.8,
-            "reasoning": "使用默认参数"
+            "reasoning": "使用默认参数",
         }

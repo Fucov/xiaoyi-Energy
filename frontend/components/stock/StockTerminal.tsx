@@ -106,6 +106,25 @@ const CustomTooltip = ({ active, payload }: TooltipProps<number, string>) => {
   return null;
 };
 
+
+
+const ToggleGroup: React.FC<{ value: string; onChange: (v: string) => void }> = ({ value, onChange }) => (
+  <div className="flex items-center bg-slate-800/50 rounded-lg p-1 border border-slate-700/50">
+    <button
+      onClick={() => onChange('plr')}
+      className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${value === 'plr' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+    >
+      Raw
+    </button>
+    <button
+      onClick={() => onChange('semantic')}
+      className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${value === 'semantic' ? 'bg-blue-500 text-white shadow-md' : 'text-slate-400 hover:text-slate-200'}`}
+    >
+      Semantic
+    </button>
+  </div>
+);
+
 const FloatingCard: React.FC<FloatingCardProps> = ({ zone, visible, onClose }) => (
   <AnimatePresence>
     {visible && zone && (
@@ -271,7 +290,14 @@ export const StockTerminal: React.FC<{ ticker?: string; initialDate?: string }> 
   const [loading, setLoading] = useState(true);
   const [newsLoading, setNewsLoading] = useState(false);
   const [activeZone, setActiveZone] = useState<AnomalyZone | null>(null);
+  const [trendAlgo, setTrendAlgo] = useState('semantic');
   const tickerRef = useRef(ticker);
+
+  const visibleZones = anomalyZones.filter(z => {
+    if (trendAlgo === 'all') return true;
+    // @ts-ignore
+    return (z.method || 'plr') === trendAlgo || (trendAlgo === 'semantic' && z.zone_type === 'semantic_regime');
+  });
 
   useEffect(() => {
     tickerRef.current = ticker;
@@ -407,6 +433,7 @@ export const StockTerminal: React.FC<{ ticker?: string; initialDate?: string }> 
                     {selectedDate && <span className="px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 text-sm">{formatDate(selectedDate)}</span>}
                   </div>
                   <div className="flex items-center gap-2 text-sm text-slate-400">
+                    <ToggleGroup value={trendAlgo} onChange={setTrendAlgo} />
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-green-500/50" />上涨</span>
                     <span className="flex items-center gap-1"><span className="w-3 h-3 rounded bg-red-500/50" />下跌</span>
                   </div>
@@ -427,9 +454,16 @@ export const StockTerminal: React.FC<{ ticker?: string; initialDate?: string }> 
                     <XAxis dataKey="date" stroke="#64748b" tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={formatDate} tickLine={false} axisLine={false} />
                     <YAxis stroke="#64748b" tick={{ fill: '#64748b', fontSize: 12 }} tickFormatter={(v) => v.toFixed(2)} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
                     <Tooltip content={<CustomTooltip />} />
-                    {anomalyZones.map((zone, idx) => (
-                      <ReferenceArea key={idx} x1={zone.startDate} x2={zone.endDate} fill={zone.sentiment === 'positive' ? 'rgba(34, 197, 94, 0.15)' : zone.sentiment === 'negative' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)'} fillOpacity={1} stroke={zone.sentiment === 'positive' ? '#22c55e' : zone.sentiment === 'negative' ? '#ef4444' : '#3b82f6'} strokeOpacity={0.5} onMouseEnter={() => setActiveZone(zone)} onMouseLeave={() => setActiveZone(null)} className="cursor-pointer transition-all duration-300" />
-                    ))}
+                    <Tooltip content={<CustomTooltip />} />
+                    {visibleZones.map((zone, idx) => {
+                      const isRaw = trendAlgo === 'plr';
+                      const isPositive = zone.sentiment === 'positive';
+                      const fill = isRaw ? 'transparent' : (isPositive ? 'rgba(34, 197, 94, 0.15)' : zone.sentiment === 'negative' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)');
+                      const stroke = isPositive ? '#22c55e' : zone.sentiment === 'negative' ? '#ef4444' : '#3b82f6';
+                      return (
+                        <ReferenceArea key={idx} x1={zone.startDate} x2={zone.endDate} fill={fill} fillOpacity={1} stroke={stroke} strokeOpacity={0.5} onMouseEnter={() => setActiveZone(zone)} onMouseLeave={() => setActiveZone(null)} className="cursor-pointer transition-all duration-300" />
+                      )
+                    })}
                     {selectedDate && <ReferenceLine x={selectedDate} stroke="#3b82f6" strokeDasharray="5 5" strokeWidth={2} />}
                     <Area type="monotone" dataKey="close" stroke="#3b82f6" strokeWidth={2} fill="url(#colorClose)" dot={(props) => {
                       const { cx, cy, payload, index } = props;

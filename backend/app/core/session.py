@@ -40,7 +40,9 @@ class Message:
     存储单轮对话的所有分析结果数据
     """
 
-    def __init__(self, message_id: str, session_id: str, redis_client: Optional[Redis] = None):
+    def __init__(
+        self, message_id: str, session_id: str, redis_client: Optional[Redis] = None
+    ):
         self.message_id = message_id
         self.session_id = session_id
         self.redis = redis_client or get_redis()
@@ -60,7 +62,7 @@ class Message:
             user_query=user_query,
             status=MessageStatus.PENDING,
             created_at=now,
-            updated_at=now
+            updated_at=now,
         )
 
         message._save(initial_data)
@@ -112,17 +114,21 @@ class Message:
             steps = get_steps_for_intent(
                 is_forecast=intent.is_forecast,
                 is_in_scope=intent.is_in_scope,
-                has_stock=has_stock
+                has_stock=has_stock,
             )
 
             data.total_steps = len(steps)
             data.step_details = [
-                StepDetail(id=s["id"], name=s["name"], status=StepStatus.PENDING, message="")
+                StepDetail(
+                    id=s["id"], name=s["name"], status=StepStatus.PENDING, message=""
+                )
                 for s in steps
             ]
 
             self._save(data)
-            print(f"[Message] Intent: {data.intent}, has_stock={has_stock}, steps={len(steps)}")
+            print(
+                f"[Message] Intent: {data.intent}, has_stock={has_stock}, steps={len(steps)}"
+            )
 
     # ========== 股票相关 ==========
 
@@ -163,7 +169,9 @@ class Message:
             data.time_series_original = points
             self._save(data)
 
-    def save_time_series_full(self, points: List[TimeSeriesPoint], prediction_start: str):
+    def save_time_series_full(
+        self, points: List[TimeSeriesPoint], prediction_start: str
+    ):
         """保存完整时序数据（含预测）"""
         data = self.get()
         if data:
@@ -200,6 +208,14 @@ class Message:
             data.emotion = score
             data.emotion_des = description
             self._save(data)
+    
+    def save_influence_analysis(self, influence_result: Dict):
+        """保存多因素影响力分析结果"""
+        data = self.get()
+        if data:
+            data.influence_analysis = influence_result
+            self._save(data)
+            print(f"[Message] Saved influence analysis: {len(influence_result.get('ranking', []))} factors")
 
     def save_anomaly_zones(self, zones: List[Dict], ticker: str):
         """保存异常区域数据"""
@@ -208,8 +224,18 @@ class Message:
             data.anomaly_zones = zones
             data.anomaly_zones_ticker = ticker
             self._save(data)
+            data.anomaly_zones_ticker = ticker
+            self._save(data)
             print(f"[Message] Saved {len(zones)} anomaly zones for ticker {ticker}")
-    
+
+    def save_change_points(self, change_points: List[Dict]):
+        """保存变点检测数据"""
+        data = self.get()
+        if data:
+            data.change_points = change_points
+            self._save(data)
+            print(f"[Message] Saved {len(change_points)} change points")
+
     def save_zone_ticker_news(self, ticker: str, date: str, news: List[Dict]):
         """保存zone-ticker特定日期的新闻缓存"""
         data = self.get()
@@ -228,7 +254,9 @@ class Message:
             # 更新existing data，保留zones等字段
             data.conclusion = conclusion
             self._save(data)
-            print(f"[Message] Updated conclusion, preserved zones: {len(data.anomaly_zones)}, news: {len(data.news_list)}")
+            print(
+                f"[Message] Updated conclusion, preserved zones: {len(data.anomaly_zones)}, news: {len(data.news_list)}"
+            )
         else:
             print("[Message] WARNING: No existing data to update conclusion!")
 
@@ -236,7 +264,7 @@ class Message:
         self,
         selected_model: str,
         model_comparison: Dict[str, Optional[float]],
-        is_better_than_baseline: bool
+        is_better_than_baseline: bool,
     ):
         """保存模型选择信息"""
         data = self.get()
@@ -246,15 +274,16 @@ class Message:
             # 或者可以通过扩展 MessageData schema 来添加字段
             # 目前先通过思考日志保存，以便后续可以查看
             import json
+
             selection_info = {
                 "selected_model": selected_model,
                 "model_comparison": model_comparison,
-                "is_better_than_baseline": is_better_than_baseline
+                "is_better_than_baseline": is_better_than_baseline,
             }
             self.append_thinking_log(
                 "model_selection",
                 "模型选择",
-                f"选择的模型: {selected_model}, 模型比较: {json.dumps(model_comparison, ensure_ascii=False)}, 优于baseline: {is_better_than_baseline}"
+                f"选择的模型: {selected_model}, 模型比较: {json.dumps(model_comparison, ensure_ascii=False)}, 优于baseline: {is_better_than_baseline}",
             )
 
     def save_model_selection_reason(self, reason: str):
@@ -304,7 +333,7 @@ class Message:
                 step_id=step_id,
                 step_name=step_name,
                 content=content,
-                timestamp=datetime.now().isoformat()
+                timestamp=datetime.now().isoformat(),
             )
             data.thinking_logs.append(entry)
             self._save(data)
@@ -332,9 +361,7 @@ class Session:
 
         now = datetime.now().isoformat()
         initial_data = SessionData(
-            session_id=session_id,
-            created_at=now,
-            updated_at=now
+            session_id=session_id, created_at=now, updated_at=now
         )
 
         session._save(initial_data)
@@ -380,10 +407,7 @@ class Session:
             raise ValueError(f"Session {self.session_id} not found")
 
         # 创建消息
-        message = Message.create(
-            session_id=self.session_id,
-            user_query=user_query
-        )
+        message = Message.create(session_id=self.session_id, user_query=user_query)
 
         # 添加到 session
         data.message_ids.append(message.message_id)
@@ -410,7 +434,11 @@ class Session:
         data = self.get()
         if not data:
             return []
-        return [Message(mid, self.session_id) for mid in data.message_ids if Message.exists(mid)]
+        return [
+            Message(mid, self.session_id)
+            for mid in data.message_ids
+            if Message.exists(mid)
+        ]
 
     # ========== 对话历史 ==========
 

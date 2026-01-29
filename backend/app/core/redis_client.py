@@ -15,7 +15,7 @@ from typing import Optional
 def get_redis_url() -> str:
     """获取 Redis 连接 URL"""
     host = os.getenv("REDIS_HOST", "localhost")
-    port = os.getenv("REDIS_PORT", "6379")
+    port = os.getenv("REDIS_PORT", "6380")
     password = os.getenv("REDIS_PASSWORD", "")
     db = os.getenv("REDIS_DB", "0")
     
@@ -36,7 +36,7 @@ class RedisClient:
             password = os.getenv("REDIS_PASSWORD", "")
             cls._instance = redis.Redis(
                 host=os.getenv("REDIS_HOST", "localhost"),
-                port=int(os.getenv("REDIS_PORT", 6379)),
+                port=int(os.getenv("REDIS_PORT", 6380)),
                 password=password if password else None,
                 db=int(os.getenv("REDIS_DB", 0)),
                 decode_responses=True,

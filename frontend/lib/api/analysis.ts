@@ -58,6 +58,35 @@ export interface EmotionData {
   description: string
 }
 
+export interface FactorInfluence {
+  factor_name: string
+  factor_name_cn?: string
+  correlation: number  // -1 到 1
+  influence_score: number  // 0 到 1
+  data: Array<{
+    date: string
+    power: number
+    factor_value: number
+  }>
+}
+
+export interface InfluenceAnalysisResult {
+  factors: Record<string, FactorInfluence>
+  correlation_matrix: number[][]  // 5x5矩阵
+  ranking: Array<{
+    factor: string
+    factor_name_cn: string
+    influence_score: number
+    correlation: number
+  }>
+  time_range: {
+    start: string
+    end: string
+  }
+  summary: string
+  overall_score?: number
+}
+
 export interface ThinkingLogEntry {
   step_id: string        // 步骤 ID，如 "intent", "sentiment", "report"
   step_name: string      // 步骤名称，如 "意图识别", "情感分析", "报告生成"
@@ -108,6 +137,9 @@ export interface MessageData {
   rag_sources: RAGSource[]  // RAG 研报来源
   emotion: number | null
   emotion_des: string | null
+  
+  // 多因素相关性分析（新）
+  influence_analysis: InfluenceAnalysisResult | null
 
   // 异常区域（关键转折点标注）
   anomaly_zones: Array<{
@@ -117,6 +149,15 @@ export interface MessageData {
     sentiment: 'positive' | 'negative'
   }>
   anomaly_zones_ticker: string | null
+
+  // 变点检测（预测部分的显著变化）
+  change_points: Array<{
+    date: string
+    index: number
+    type: string
+    magnitude: number
+    reason: string
+  }>
 
   conclusion: string
 
@@ -243,7 +284,7 @@ export interface FullStreamEvent {
   step?: number
   step_name?: string
   content?: string
-  data_type?: 'time_series_original' | 'time_series_full' | 'news' | 'emotion' | 'anomaly_zones'
+  data_type?: 'time_series_original' | 'time_series_full' | 'news' | 'emotion' | 'influence' | 'anomaly_zones' | 'rag_sources'
   data?: unknown
   prediction_start_day?: string
   intent?: string
@@ -487,6 +528,14 @@ export async function resumeStream(
 
               case 'thinking':
                 callbacks.onThinking?.(event.content || '')
+                break
+
+              case 'intent':
+                callbacks.onIntent?.(
+                  event.intent || '',
+                  event.is_forecast || false,
+                  event.reason || ''
+                )
                 break
 
               case 'data':

@@ -21,6 +21,10 @@ class Settings:
     # External Services
     RAG_SERVICE_URL: str = os.getenv("RAG_SERVICE_URL", "")
     
+    # Weather API (可选，Open-Meteo无需API Key)
+    WEATHER_API_KEY: str = os.getenv("WEATHER_API_KEY", "")
+    WEATHER_API_PROVIDER: str = os.getenv("WEATHER_API_PROVIDER", "openmeteo")  # openmeteo 或 openweathermap
+    
     # CORS settings
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",

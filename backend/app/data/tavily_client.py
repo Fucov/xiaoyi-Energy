@@ -23,6 +23,31 @@ CN_FINANCE_DOMAINS = [
     "cs.com.cn",         # 中证网
 ]
 
+# 中国新闻/天气/能源网站域名白名单
+CN_NEWS_DOMAINS = [
+    "eastmoney.com",     # 东方财富
+    "sina.com.cn",       # 新浪
+    "163.com",           # 网易
+    "qq.com",            # 腾讯
+    "sohu.com",          # 搜狐
+    "people.com.cn",     # 人民网
+    "xinhuanet.com",     # 新华网
+    "chinanews.com.cn",  # 中国新闻网
+    "bjnews.com.cn",     # 新京报
+    "thepaper.cn",       # 澎湃新闻
+    "cctv.com",          # 央视网
+    "weather.com.cn",    # 中国天气网
+    "weather.gov.cn",    # 中国气象局
+    "nea.gov.cn",        # 国家能源局
+    "sgcc.com.cn",       # 国家电网
+    "csg.cn",            # 南方电网
+    "in-en.com",         # 国际能源网
+    "ne21.com",          # 北极星电力网
+    "bjx.com.cn",        # 北极星电力网
+    "cec.org.cn",        # 中国电力企业联合会
+    "cet.com.cn",        # 中国电力新闻网
+]
+
 
 class TavilyNewsClient:
     """Tavily 新闻搜索客户端"""
@@ -39,13 +64,17 @@ class TavilyNewsClient:
         max_results: int = 10,
         search_depth: str = "advanced",  # "basic" 或 "advanced"
         include_domains: Optional[List[str]] = None,
+        country: Optional[str] = None,     # 国家代码，如 "china"（仅在 topic="general" 时可用）
     ) -> Dict:
         # 构建搜索参数
+        # 如果指定了 country 参数，必须使用 topic="general"（country 参数只在 general 时可用）
+        topic = "general" if country else "news"
+        
         search_params = {
             "query": query,
             "search_depth": search_depth,
             "max_results": max_results,
-            "topic": "news",  # 限定为新闻搜索
+            "topic": topic,
         }
 
         # 时间过滤：优先使用 start_date/end_date，其次降级到 days
@@ -61,6 +90,10 @@ class TavilyNewsClient:
         # 域名过滤
         if include_domains:
             search_params["include_domains"] = include_domains
+        
+        # 国家/区域过滤（仅在 topic="general" 时可用）
+        if country:
+            search_params["country"] = country.lower()
 
         try:
             response = self.client.search(**search_params)
@@ -106,4 +139,44 @@ class TavilyNewsClient:
             max_results=max_results,
             search_depth="advanced",
             include_domains=CN_FINANCE_DOMAINS,
+        )
+
+    def search_weather_news(
+        self,
+        region_name: str,
+        start_date: Optional[str] = None,  # 格式: YYYY-MM-DD
+        end_date: Optional[str] = None,    # 格式: YYYY-MM-DD
+        days: int = 30,                    # 保留作为 fallback，当 start_date/end_date 未指定时使用
+        max_results: int = 10,
+        country: Optional[str] = None,     # 默认不使用 country，以保持 topic="news"
+    ) -> Dict:
+        """
+        搜索天气/电力相关新闻
+
+        Args:
+            region_name: 区域名称（城市名称）
+            start_date: 开始日期
+            end_date: 结束日期
+            days: 天数
+            max_results: 最大结果数
+            country: 国家代码（可选）。注意：设置后 topic 会从 "news" 变为 "general"，
+                     可能导致新闻搜索质量下降，建议通过 include_domains 控制来源。
+
+        Returns:
+            搜索结果字典
+        """
+        # 构建搜索查询：使用精简关键词，避免过度限制
+        query = f"{region_name} 电力 供电 天气"
+
+        # 使用 topic="news"（不传 country）+ 域名白名单确保中文新闻结果
+        # 注意：country 参数会强制 topic="general"，降低新闻搜索质量
+        return self.search(
+            query=query,
+            start_date=start_date,
+            end_date=end_date,
+            days=days if not start_date and not end_date else None,
+            max_results=max_results,
+            search_depth="advanced",
+            include_domains=CN_NEWS_DOMAINS,
+            country=country,
         )
