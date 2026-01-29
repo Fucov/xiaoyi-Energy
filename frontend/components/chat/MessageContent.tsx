@@ -589,11 +589,18 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         if (sameDirection && isContiguous) {
           // Validate continuity: if gap is small enough? For now assume strict or close enough
           // Extend current
+          // FIX: Weighted Average for accuracy
+          const currentDur = (new Date(current.endDate).getTime() - new Date(current.startDate).getTime());
+          const nextDur = (new Date(next.endDate).getTime() - new Date(next.startDate).getTime());
+          const totalDur = currentDur + nextDur;
+          const newAvgReturn = ((current.avg_return * currentDur) + (next.avg_return * nextDur)) / (totalDur || 1);
+
           current = {
             ...current,
             endDate: next.endDate,
-            avg_return: (current.avg_return + next.avg_return) / 2, // Approximation, weighted would be better
-            events: [...(current.events || []), ...(next.events || [])]
+            avg_return: newAvgReturn,
+            events: [...(current.events || []), ...(next.events || [])],
+            sentiment: newAvgReturn >= 0 ? 'positive' : 'negative'
           };
         } else {
           merged.push(current);
@@ -633,18 +640,28 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
             if (prevDir === nextDir && currDir !== prevDir) {
               // Check if Curr is "Small/Noise"
-              const currDuration = (new Date(curr.endDate).getTime() - new Date(curr.startDate).getTime()) / (1000 * 60 * 60 * 24);
-              const isShort = currDuration <= 7; // 7 days threshold for noise
-              const isWeak = Math.abs(curr.avg_return || 0) < 0.05; // 5% threshold
+              // FIX: Do NOT use Duration as primary factor for noise if magnitude is large!
+              // A 13% drop in 2 days is NOT noise.
+              // New Logic: Must be weak (< 4% change) to be considered noise.
+              const isWeak = Math.abs(curr.avg_return || 0) < 0.04;
 
-              if (isShort || isWeak) {
-                // MERGE ALL THREE into Prev (effectively absorbing curr and next)
+              if (isWeak) {
+                // MERGE ALL THREE into Prev
+                // FIX: Calculate Weighted Average Return to be accurate
+                const prevDur = (new Date(prev.endDate).getTime() - new Date(prev.startDate).getTime());
+                const currDur = (new Date(curr.endDate).getTime() - new Date(curr.startDate).getTime());
+                const nextDur = (new Date(next.endDate).getTime() - new Date(next.startDate).getTime());
+                const totalDur = prevDur + currDur + nextDur;
+
+                const weightedReturn = ((prev.avg_return * prevDur) + (curr.avg_return * currDur) + (next.avg_return * nextDur)) / totalDur;
+
                 result[result.length - 1] = {
                   ...prev,
                   endDate: next.endDate,
                   events: [...(prev.events || []), ...(curr.events || []), ...(next.events || [])],
-                  // Weighted return approximation (simplistic)
-                  avg_return: (prev.avg_return + next.avg_return) / 2
+                  avg_return: weightedReturn,
+                  // CRITICAL FIX: Update sentiment to match the new return!
+                  sentiment: weightedReturn >= 0 ? 'positive' : 'negative'
                 };
                 i += 2; // Skip curr and next
                 merged = true;
@@ -1531,10 +1548,16 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
             {useSemanticRegimes && semanticRegimes.map((regime: any, idx: number) => {
               // CRITICAL FIX: Use sentiment field (from backend) instead of displayType
+              // AND PRIORITIZE avg_return for color determination to ensure visual accuracy!
+              const returnVal = regime.avg_return !== undefined ? regime.avg_return : 0;
+              const hasReturn = regime.avg_return !== undefined;
+
               const sentiment = regime.sentiment || regime.displayType;
-              const isPositive = sentiment === 'positive' || sentiment === 'up';
-              const isNegative = sentiment === 'negative' || sentiment === 'down';
-              const isSideways = sentiment === 'sideways' || sentiment === 'neutral';
+              // If we have a numeric return, use it! Otherwise fall back to sentiment string.
+              const isPositive = hasReturn ? returnVal >= 0 : (sentiment === 'positive' || sentiment === 'up');
+              const isNegative = hasReturn ? returnVal < 0 : (sentiment === 'negative' || sentiment === 'down');
+
+              // const isSideways = sentiment === 'sideways' || sentiment === 'neutral'; // Not strictly used for fill color logic below
 
               // A-share colors: Red for Up/Positive, Green for Down/Negative, Gray for Sideways
               const fill = isPositive ? '#ef4444' : (isNegative ? '#10b981' : '#6b7280');
