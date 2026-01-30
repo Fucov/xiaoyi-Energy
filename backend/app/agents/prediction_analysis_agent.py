@@ -108,3 +108,68 @@ class PredictionAnalysisAgent:
         except Exception as e:
             print(f"[PredictionAnalysisAgent] Error: {e}")
             return "Analysis failed due to service error."
+
+    def analyze_prediction_zone(self, zone_info: Dict, region_name: str) -> str:
+        """
+        Analyze the cause of a predicted future trend (interval).
+
+        Args:
+            zone_info: Dictionary containing zone info (startDate, endDate, direction, avg_return).
+            region_name: Name of the region.
+
+        Returns:
+            A short explanation of the likely cause (seasonality, holiday, etc.).
+        """
+        if not self.client:
+            return "智能分析不可用 (未配置 API Key)"
+
+        start_date = zone_info.get("startDate")
+        end_date = zone_info.get("endDate")
+        # direction = zone_info.get("direction", "unknown")  # Unused
+        avg_return = zone_info.get("avg_return", 0) * 100  # Convert to percentage
+        # summary = zone_info.get("summary", "")  # Unused
+
+        prompt = f"""
+        你是电力领域的专家分析师。
+        针对 **{region_name}** 地区，模型预测在 **{start_date} 至 {end_date}** 期间，
+        供电需求将呈现 **{"上升" if avg_return > 0 else "下降"}** 趋势，
+        变化幅度约为 **{avg_return:+.1f}%**。
+        
+        请结合该地区的气候特征（{start_date}左右的季节性气温）、节假日安排（春节、国庆、暑期等）以及工业生产规律，
+        分析导致这一预测趋势的主要原因。
+
+        要求：
+        1. **一句话解释**，简练专业（不超过50字）。
+        2. 必须明确提及具体原因（如："受春节假期工厂停工影响" 或 "进入夏季高温期，制冷负荷增加"）。
+        3. 严禁使用模棱两可的废话（如"受多种因素影响"）。
+        4. 仅输出原因，不要重复描述趋势。
+        5. 结合日期判断：
+           - 1-2月：重点考虑春节、寒潮。
+           - 6-8月：重点考虑夏季高温、制冷。
+           - 10月：国庆假期。
+           - 11-12月：冬季供暖（如果该地区有）。
+
+        输出示例：
+        - 受春节假期工厂大规模停工影响，工业负荷显著下降。
+        - 进入夏季主汛期，高温天气导致居民制冷负荷大幅攀升。
+
+        分析结果：
+        """
+
+        try:
+            response = self.client.chat.completions.create(
+                model="deepseek-chat",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": "You are an expert power grid analyst.",
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=100,
+                temperature=0.3,
+            )
+            return response.choices[0].message.content.strip()
+        except Exception as e:
+            print(f"[PredictionAnalysisAgent] Error: {e}")
+            return "无法生成分析"

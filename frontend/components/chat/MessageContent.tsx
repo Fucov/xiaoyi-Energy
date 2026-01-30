@@ -354,7 +354,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     if (savedDate) {
       setSelectedDate(savedDate);
       setNewsSidebarOpen(savedSidebarOpen);
-      console.log('[MessageContent] Restored from URL - date:', savedDate, 'sidebar:', savedSidebarOpen);
+      // console.log('[MessageContent] Restored from URL - date:', savedDate, 'sidebar:', savedSidebarOpen);
     }
   }, [ticker]); // 只在ticker变化时执行
 
@@ -437,7 +437,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       const sortedDates = Array.from(allDates).sort()
 
       return sortedDates
-        .filter(date => isWeekday(date))
+        // .filter(date => isWeekday(date)) // User Request: Show ALL days for power data
         .map(date => {
           const histPoint = history.find(p => p.date === date)
           const truthPoint = groundTruth.find(p => p.date === date)
@@ -459,7 +459,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         item[dataset.label] = dataset.data[index]
       })
       return item
-    }).filter(item => isWeekday(item.name as string))
+    })//.filter(item => isWeekday(item.name as string)) // User Request: Show ALL days
   }, [data, backtest.chartData])
 
   // 计算Y轴范围（自适应）- 基于所有数据，保持一致性
@@ -519,6 +519,15 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   const [mouseY, setMouseY] = useState<number | null>(null) // 鼠标相对于绘图区域的Y坐标（像素）
   const [plotAreaBounds, setPlotAreaBounds] = useState<{ top: number; height: number } | null>(null) // 绘图区域边界
 
+  // Use refs to avoid closure staleness issues in event listeners (Fixes Freeze)
+  const viewStateRef = useRef({ startIndex: viewStartIndex, endIndex: viewEndIndex, chartLen: chartData.length });
+  // Drag state ref to avoid re-binding mousemove listeners
+  const dragStateRef = useRef({ isDragging: false, dragStartX: 0, dragStartIndex: 0 });
+
+  useEffect(() => {
+    viewStateRef.current = { startIndex: viewStartIndex, endIndex: viewEndIndex, chartLen: chartData.length };
+  }, [viewStartIndex, viewEndIndex, chartData.length]);
+
   // 滑块拖拽状态
   const [isDraggingSlider, setIsDraggingSlider] = useState(false)
   const [tempSplitDate, setTempSplitDate] = useState<string | null>(null) // 拖拽时的临时分割日期
@@ -568,20 +577,31 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   const semanticRegimes = useMemo(() => {
     // --- Helper Functions (Hoisted for reuse) ---
 
-    // 3. CRITICAL: Aggregate raw zones (anomalyZones) into semantic zones as events
-    // This enables the "Event Flow" tooltip to show the timeline of raw zones
     const aggregateRawZones = (semanticZone: any, isPrediction: boolean) => {
       if (!anomalyZones || anomalyZones.length === 0) return semanticZone;
 
       // Find all raw zones that overlap with this semantic zone
       const overlappingRawZones = anomalyZones.filter((rawZone: any) => {
         const zoneMethod = rawZone.method || 'plr';
-        // If semantic zone is prediction, ONLY match prediction raw zones
+        // Basic match: Time overlap
+        let matches = false;
         if (isPrediction) {
-          return (zoneMethod === 'plr_prediction' || rawZone.is_prediction);
+          matches = (zoneMethod === 'plr_prediction' || rawZone.is_prediction);
+        } else {
+          matches = (zoneMethod === 'plr' || !rawZone.is_prediction) && rawZone.startDate >= semanticZone.startDate && rawZone.endDate <= semanticZone.endDate;
         }
-        // Otherwise match historical raw zones
-        return (zoneMethod === 'plr' || !rawZone.is_prediction) && rawZone.startDate <= semanticZone.endDate && rawZone.endDate >= semanticZone.startDate;
+
+        // FIX: Direction Consistency Check
+        if (matches) {
+          const semanticSign = (semanticZone.avg_return || 0) >= 0;
+          const rawSign = (rawZone.avg_return || 0) >= 0;
+          // If Semantic is significant (>1%), prefer consistent events.
+          // This removes contradictory "noise" events (like heavy rain during a heatwave trend)
+          if (Math.abs(semanticZone.avg_return || 0) > 0.01) {
+            return semanticSign === rawSign;
+          }
+        }
+        return matches;
       });
 
       // Convert raw zones to event format for tooltip display
@@ -591,7 +611,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         // FIX: Prioritize event_summary (rich text) over summary (generic text)
         summary: rawZone.event_summary || rawZone.summary || 'Raw Zone Event',
         event_summary: rawZone.event_summary || rawZone.summary,
-        avg_return: rawZone.avg_return,
+        avg_return: rawZone.avg_return, // Will recalculate in tooltip
         startPrice: rawZone.startPrice,
         endPrice: rawZone.endPrice,
         type: rawZone.type || rawZone.displayType || 'raw',
@@ -602,6 +622,27 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         ...semanticZone,
         events: events.length > 0 ? events : (semanticZone.events || [])
       };
+    };
+
+    // Helper: Merge events uniquely by Date + Summary (Robust Dedup)
+    const mergeUniqueEvents = (eventsA: any[], eventsB: any[]) => {
+      const merged = [...(eventsA || [])];
+      // Create a set of signatures: Date + Summary (First 20 chars)
+      // FIX: Remove avg_return from key to prevent duplicates with floating point differences
+      const seen = new Set(merged.map(e => {
+        const summary = (e.event_summary || e.summary || '').trim();
+        return `${e.startDate}-${summary.substring(0, 20)}`;
+      }));
+
+      (eventsB || []).forEach(e => {
+        const summary = (e.event_summary || e.summary || '').trim();
+        const key = `${e.startDate}-${summary.substring(0, 20)}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          merged.push(e);
+        }
+      });
+      return merged;
     };
 
     // Merge logic: Merge adjacent zones with same sentiment
@@ -628,17 +669,31 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         if (sameDirection && isContiguous) {
           // Validate continuity: if gap is small enough? For now assume strict or close enough
           // Extend current
-          // FIX: Weighted Average for accuracy
-          const currentDur = (new Date(current.endDate).getTime() - new Date(current.startDate).getTime());
-          const nextDur = (new Date(next.endDate).getTime() - new Date(next.startDate).getTime());
-          const totalDur = currentDur + nextDur;
-          const newAvgReturn = ((current.avg_return * currentDur) + (next.avg_return * nextDur)) / (totalDur || 1);
+          // FIX: Strict Growth Rate Calculation: (End - Start) / Start
+          // preserve startPrice from 'current' (first block) and take endPrice from 'next' (last block)
+          // Note: we assume curr.startPrice is valid. If not, fallback to curr.avg_return accumulation (but we try strict first)
+          const newEnd = next.endDate;
+          const mergedEndPrice = next.endPrice || next.close; // Ensure backend sends endPrice
+          const mergedStartPrice = current.startPrice;
+
+          let newAvgReturn = 0;
+          if (mergedStartPrice && mergedEndPrice) {
+            newAvgReturn = (mergedEndPrice - mergedStartPrice) / mergedStartPrice;
+          } else {
+            // Fallback to weighted average if prices missing (should not happen with new backend)
+            const currentDur = (new Date(current.endDate).getTime() - new Date(current.startDate).getTime());
+            const nextDur = (new Date(next.endDate).getTime() - new Date(next.startDate).getTime());
+            const totalDur = currentDur + nextDur;
+            newAvgReturn = ((current.avg_return * currentDur) + (next.avg_return * nextDur)) / (totalDur || 1);
+          }
 
           current = {
             ...current,
-            endDate: next.endDate,
+            endDate: newEnd,
             avg_return: newAvgReturn,
-            events: [...(current.events || []), ...(next.events || [])],
+            endPrice: mergedEndPrice, // Update end price
+            // events: merge unique
+            events: mergeUniqueEvents(current.events, next.events),
             sentiment: newAvgReturn >= 0 ? 'positive' : 'negative'
           };
         } else {
@@ -679,25 +734,42 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
             if (prevDir === nextDir && currDir !== prevDir) {
               // Check if Curr is "Small/Noise"
-              // FIX: Do NOT use Duration as primary factor for noise if magnitude is large!
-              // A 13% drop in 2 days is NOT noise.
-              // New Logic: Must be weak (< 4% change) to be considered noise.
-              const isWeak = Math.abs(curr.avg_return || 0) < 0.04;
+              // New Logic: Hybrid Thresholds
+              // 1. Noise: < 2.5% (Always merge)
+              // 2. Weak Short Trend: < 5.0% AND < 10 days (Merge)
+              // 3. Real Trend: >= 5.0% OR (>= 2.5% AND >= 10 days) (Keep)
+              const absReturn = Math.abs(curr.avg_return || 0);
+              const d1 = new Date(curr.startDate).getTime();
+              const d2 = new Date(curr.endDate).getTime();
+              const days = (d2 - d1) / (1000 * 3600 * 24);
+
+              const isNoise = absReturn < 0.025; // 2.5% Noise
+              const isWeakShort = absReturn < 0.05 && days < 10; // 5% & < 10 days
+
+              const isWeak = isNoise || isWeakShort;
 
               if (isWeak) {
                 // MERGE ALL THREE into Prev
-                // FIX: Calculate Weighted Average Return to be accurate
-                const prevDur = (new Date(prev.endDate).getTime() - new Date(prev.startDate).getTime());
-                const currDur = (new Date(curr.endDate).getTime() - new Date(curr.startDate).getTime());
-                const nextDur = (new Date(next.endDate).getTime() - new Date(next.startDate).getTime());
-                const totalDur = prevDur + currDur + nextDur;
+                // FIX: Strict Growth Rate Calculation
+                const newStartP = prev.startPrice;
+                const newEndP = next.endPrice;
+                let weightedReturn = 0;
 
-                const weightedReturn = ((prev.avg_return * prevDur) + (curr.avg_return * currDur) + (next.avg_return * nextDur)) / totalDur;
+                if (newStartP && newEndP) {
+                  weightedReturn = (newEndP - newStartP) / newStartP;
+                } else {
+                  const prevDur = (new Date(prev.endDate).getTime() - new Date(prev.startDate).getTime());
+                  const currDur = (new Date(curr.endDate).getTime() - new Date(curr.startDate).getTime());
+                  const nextDur = (new Date(next.endDate).getTime() - new Date(next.startDate).getTime());
+                  const totalDur = prevDur + currDur + nextDur;
+                  weightedReturn = ((prev.avg_return * prevDur) + (curr.avg_return * currDur) + (next.avg_return * nextDur)) / totalDur;
+                }
 
                 result[result.length - 1] = {
                   ...prev,
                   endDate: next.endDate,
-                  events: [...(prev.events || []), ...(curr.events || []), ...(next.events || [])],
+                  endPrice: newEndP, // CRITICAL FIX: Update endPrice to ensure correct return calculation
+                  events: mergeUniqueEvents(prev.events, mergeUniqueEvents(curr.events, next.events)),
                   avg_return: weightedReturn,
                   // CRITICAL FIX: Update sentiment to match the new return!
                   sentiment: weightedReturn >= 0 ? 'positive' : 'negative'
@@ -721,7 +793,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
     // 1. If Backend already provided Semantic Zones, use them directly!
     // This supports "Event Flow" feature and robust backend merging
-    if (semantic_zones.length > 0 || (prediction_semantic_zones && prediction_semantic_zones.length > 0)) {
+    // FIX: Also enter this block if we have anomalyZones and useSemanticRegimes is true,
+    // so we can utilize the "Convert raw to semantic" logic inside.
+    if (semantic_zones.length > 0 || (prediction_semantic_zones && prediction_semantic_zones.length > 0) || (useSemanticRegimes && anomalyZones && anomalyZones.length > 0)) {
       // 1. Raw zones
       let historicalZones = semantic_zones.map((z: any) => ({ ...z, isPrediction: false }));
 
@@ -749,19 +823,36 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         }));
       }
 
-      let predictionZones = (prediction_semantic_zones || []).map((z: any) => ({ ...z, isPrediction: true }));
+      // FIX: Derive predictionZones from anomalyZones (backend unifies them) instead of relying on separate prop
+      // Use existing 'rawPrediction' if available or filter here
+      let predictionZones = (anomalyZones || [])
+        .filter((z: any) => z.method === 'plr_prediction' || z.is_prediction);
+
+      predictionZones = predictionZones.map((z: any) => ({ ...z, isPrediction: true }));
 
       // Apply aggregation to both historical and prediction zones
-      historicalZones = historicalZones.map(z => aggregateRawZones(z, false));
-      // predictionZones: First aggregate events, THEN merge adjacent zones to form larger blocks
-      predictionZones = predictionZones.map(z => aggregateRawZones(z, true));
-      predictionZones = mergeSemanticZones(predictionZones);
-      predictionZones = smoothSemanticZones(predictionZones);
+      // Apply aggregation to both historical and prediction zones
+      // Apply aggregation to both historical and prediction zones
+      if (historicalZones && historicalZones.length > 0) {
+        historicalZones = historicalZones.map(z => aggregateRawZones(z, false));
+        // FIX: If generated from raw (backend semantic_zones empty), we MUST Merge and Smooth to create solid blocks
+        if (semantic_zones.length === 0) {
+          historicalZones = mergeSemanticZones(historicalZones);
+          historicalZones = smoothSemanticZones(historicalZones);
+        }
+      }
+
+      if (predictionZones && predictionZones.length > 0) {
+        // predictionZones: First aggregate events, THEN merge adjacent zones to form larger blocks
+        predictionZones = predictionZones.map(z => aggregateRawZones(z, true));
+        predictionZones = mergeSemanticZones(predictionZones);
+        predictionZones = smoothSemanticZones(predictionZones);
+      }
 
       // Merge history and prediction zones
       return [
-        ...historicalZones,
-        ...predictionZones
+        ...(historicalZones || []),
+        ...(predictionZones || [])
       ];
     }
 
@@ -790,7 +881,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       const rawPrediction = sortedZones.filter(z => z.method === 'plr_prediction' || z.is_prediction);
 
       // 2. Convert and Merge History
-      const semanticHistory = mergeSemanticZones(rawHistory.map(z => ({
+      let semanticHistory = mergeSemanticZones(rawHistory.map(z => ({
         ...z,
         isPrediction: false,
         events: [{
@@ -805,6 +896,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           sentiment: z.sentiment
         }]
       })));
+
+      // Apply Smoothing to History as well to ensure visual and value consistency
+      semanticHistory = smoothSemanticZones(semanticHistory);
 
       // 3. Convert and Merge Prediction
       // Apply: Strict Merge -> Smooth Noise -> Strict Merge (Cleanup)
@@ -947,19 +1041,31 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               ? ((endPrice - startPrice) / startPrice * 100).toFixed(2) + '%'
               : 'N/A';
 
+            // FIX: Preserve existing events (Deepseek analysis) and merge with anomalies
+            const existingEvents = regime.events || [];
+            const mergedEvents = [...existingEvents];
+
+            // Avoid duplicates if anomalies are already in existingEvents? 
+            // Usually existingEvents are Area events (Analysis), regimeEvents are Points.
+            // Just append is fine.
+            regimeEvents.forEach((ev: any) => {
+              // simple check to avoid exact dup by object ref or content
+              const isDup = existingEvents.some((e: any) => e.date === ev.date && e.price === ev.price);
+              if (!isDup) mergedEvents.push(ev);
+            });
+
             return {
               ...regime,
               displayType: type,
               efficiencyRatio,
               totalChange,
-              events: regimeEvents,
+              events: mergedEvents,
               startPrice,
               endPrice
             };
           }
         }
       }
-      // If ER < 0.3, force sideways
       // If ER < 0.3, force sideways
       // DISABLED: PLR is volatile, this makes everything grey. Let original type stand.
       // if (efficiencyRatio < 0.3) {
@@ -975,12 +1081,20 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         ? ((endPrice - startPrice) / startPrice * 100).toFixed(2) + '%'
         : 'N/A';
 
+      // FIX: Preserve existing events (Deepseek analysis) and merge with anomalies
+      const existingEvents = regime.events || [];
+      const mergedEvents = [...existingEvents];
+      regimeEvents.forEach((ev: any) => {
+        const isDup = existingEvents.some((e: any) => e.date === ev.date && e.price === ev.price);
+        if (!isDup) mergedEvents.push(ev);
+      });
+
       return {
         ...regime,
         displayType: type,
         efficiencyRatio,
         totalChange,
-        events: regimeEvents,
+        events: mergedEvents,
         startPrice,
         endPrice
       };
@@ -1000,25 +1114,30 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
   // === Optimized Zone Lookup ===
   // Create a map of date -> zone for O(1) lookup to prevent lag
+  // === Optimized Zone Lookup ===
+  // Create a map of date -> zone for O(1) lookup
   const zoneMap = useMemo(() => {
     const map = new Map();
-    const zones = useSemanticRegimes ? semanticRegimes : visibleZones; // Use calculated semanticRegimes or visibleZones
-    if (!zones) return map;
+    const zones = useSemanticRegimes ? semanticRegimes : visibleZones;
+    if (!zones || !chartData) return map;
 
-    zones.forEach((z: any) => {
-      // Expand date range to individual dates
-      // Simple approach: Iterate from start to end date
-      let curr = new Date(z.startDate);
-      const end = new Date(z.endDate);
-      while (curr <= end) {
-        const dateStr = curr.toISOString().split('T')[0];
-        // If multiple zones overlap, last one wins (usually fine, or we can store list)
-        map.set(dateStr, z);
-        curr.setDate(curr.getDate() + 1);
+    // Iterate chartData to ensure keys match exactly what Recharts uses for tooltips
+    chartData.forEach((d: any) => {
+      const dateStr = d.name; // This is the label Recharts passes to CustomTooltip
+
+      // Find zone covering this date
+      // Note: zones are sorted, we can optimize, but simple find is fine for N=800
+      const coveringZone = zones.find((z: any) => {
+        return dateStr >= z.startDate && dateStr <= z.endDate;
+      });
+
+      if (coveringZone) {
+        map.set(dateStr, coveringZone);
       }
     });
+
     return map;
-  }, [useSemanticRegimes, semanticRegimes, visibleZones]);
+  }, [useSemanticRegimes, semanticRegimes, visibleZones, chartData]);
 
 
   // === Custom Tooltip for Event Flow ===
@@ -1060,10 +1179,40 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
     // Zone Tooltip
     // Fix: Revert colors to A-share style (Red=Up, Green=Down)
-    const isPositive = (currentZone.avg_return || 0) >= 0;
+    // FIX: Calculate growth rate from Semantic Start/End Price if available
+    let displayReturn = currentZone.avg_return || 0;
+    if (currentZone.startPrice && currentZone.endPrice) {
+      displayReturn = (currentZone.endPrice - currentZone.startPrice) / currentZone.startPrice;
+    }
+
+    const isPositive = displayReturn >= 0;
     const color = isPositive ? '#ef4444' : '#10b981';
     const bgColor = isPositive ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)';
     const borderColor = isPositive ? 'rgba(239, 68, 68, 0.3)' : 'rgba(16, 185, 129, 0.3)';
+
+    // Filter and Deduplicate Events
+    const rawEvents = currentZone.events || [];
+    const validEvents = rawEvents.filter((evt: any) => {
+      // Strict containment check
+      return evt.startDate >= currentZone.startDate && evt.endDate <= currentZone.endDate;
+    });
+
+    // Deduplicate by summary and date
+    const uniqueEvents: any[] = [];
+    const seenEvents = new Set();
+    validEvents.forEach((evt: any) => {
+      // FIX: Strict deduplication by Date + Summary
+      // We normalize summary to catch duplicates with minor spacing differences
+      const summary = (evt.event_summary || evt.summary || '').trim();
+      const key = `${evt.startDate}-${summary}`;
+      if (!seenEvents.has(key)) {
+        seenEvents.add(key);
+        uniqueEvents.push(evt);
+      }
+    });
+
+    // Sort by date
+    uniqueEvents.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime());
 
     return (
       <div className="bg-gray-900/95 border border-white/10 rounded-lg shadow-xl backdrop-blur-md max-w-sm overflow-hidden text-sm">
@@ -1077,12 +1226,27 @@ function InteractiveChart({ content }: { content: ChartContent }) {
         >
           <div className="flex items-center gap-2">
             <span className={`font-bold font-mono ${isPositive ? 'text-red-400' : 'text-green-400'}`}>
-              {(currentZone.avg_return * 100).toFixed(1)}%
+              {(displayReturn * 100).toFixed(1)}%
             </span>
             <span className="text-xs text-white/50">
               {currentZone.startDate} ~ {currentZone.endDate}
             </span>
           </div>
+        </div>
+
+        {/* Current Data points (Y-axis values) */}
+        <div className="px-3 py-2 bg-black/20 border-b border-white/5 space-y-1">
+          {payload.map((entry: any, index: number) => (
+            <div key={index} className="flex justify-between items-center text-xs">
+              <span style={{ color: entry.color }} className="font-medium">
+                {entry.name}
+              </span>
+              <span className="font-mono text-gray-200">
+                {typeof entry.value === 'number' ? entry.value.toFixed(2) : entry.value}
+                <span className="ml-1 text-gray-500 scale-90 inline-block">MW</span>
+              </span>
+            </div>
+          ))}
         </div>
 
         {/* Event List */}
@@ -1094,9 +1258,18 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
           <div className="space-y-3">
             {/* If we have specific sub-events in 'events' field */}
-            {currentZone.events && currentZone.events.length > 0 ? (
-              currentZone.events.map((evt: any, idx: number) => {
-                const evtReturn = evt.startPrice ? ((evt.endPrice - evt.startPrice) / evt.startPrice) : (evt.avg_return || 0);
+            {uniqueEvents.length > 0 ? (
+              uniqueEvents.map((evt: any, idx: number) => {
+                // FIX: Sub-event value must be (End - Start) / Start
+                let evtReturn = evt.avg_return || 0;
+                if (evt.startPrice && evt.endPrice) {
+                  evtReturn = (evt.endPrice - evt.startPrice) / evt.startPrice;
+                } else if (evt.price && currentZone.startPrice) {
+                  // If it's a point event with a price, calculate return relative to zone start
+                  evtReturn = (evt.price - currentZone.startPrice) / currentZone.startPrice;
+                }
+
+
                 const isEvtPos = evtReturn >= 0;
                 return (
                   <div key={idx} className="relative pl-3 border-l border-gray-700">
@@ -1136,40 +1309,60 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       setIsDragging(true)
       setDragStartX(e.clientX)
       setDragStartIndex(viewStartIndex)
+      dragStateRef.current = { isDragging: true, dragStartX: e.clientX, dragStartIndex: viewStartIndex };
       e.preventDefault()
     }
   }, [viewStartIndex])
 
-  // 鼠标移动拖拽
+  // 鼠标移动拖拽 - Optimized with Refs + requestAnimationFrame
+  const requestRef = useRef<number>();
+
   const handleMouseMove = useCallback((e: MouseEvent) => {
+    // Access latest state from refs
+    const { isDragging, dragStartX, dragStartIndex } = dragStateRef.current;
+
     if (!isDragging || !chartContainerRef.current) return
 
-    const container = chartContainerRef.current
-    const containerWidth = container.clientWidth
-    const deltaX = dragStartX - e.clientX // 反转方向：向左拖拽显示更早的数据
-    const dataRange = viewEndIndex - viewStartIndex + 1
-    const pixelsPerDataPoint = containerWidth / dataRange
+    // Use rAF to throttle updates properly
+    if (requestRef.current) return; // Skip if frame pending
 
-    // 计算应该移动的数据点数量
-    const dataPointsToMove = Math.round(deltaX / pixelsPerDataPoint)
-    const newStartIndex = dragStartIndex + dataPointsToMove
+    requestRef.current = requestAnimationFrame(() => {
+      // We also need latest view state to calculate bounds
+      const { chartLen } = viewStateRef.current;
+      const { startIndex: currentViewStart, endIndex: currentViewEnd } = viewStateRef.current;
 
-    // 限制在有效范围内
-    const minStart = 0
-    const maxStart = Math.max(0, chartData.length - dataRange)
+      const container = chartContainerRef.current
+      if (!container) return; // Safety check inside rAF
 
-    const clampedStart = Math.max(minStart, Math.min(maxStart, newStartIndex))
-    const clampedEnd = clampedStart + dataRange - 1
+      const containerWidth = container.clientWidth
+      const deltaX = dragStartX - e.clientX // 反转方向：向左拖拽显示更早的数据
+      const dataRange = currentViewEnd - currentViewStart + 1
+      const pixelsPerDataPoint = containerWidth / dataRange
 
-    if (clampedStart !== viewStartIndex || clampedEnd !== viewEndIndex) {
-      setViewStartIndex(clampedStart)
-      setViewEndIndex(clampedEnd)
-    }
-  }, [isDragging, dragStartX, dragStartIndex, viewStartIndex, viewEndIndex, chartData.length])
+      // 计算应该移动的数据点数量
+      const dataPointsToMove = Math.round(deltaX / pixelsPerDataPoint)
+      const newStartIndex = dragStartIndex + dataPointsToMove
+
+      // 限制在有效范围内
+      const minStart = 0
+      const maxStart = Math.max(0, chartLen - dataRange)
+
+      const clampedStart = Math.max(minStart, Math.min(maxStart, newStartIndex))
+      const clampedEnd = clampedStart + dataRange - 1
+
+      if (clampedStart !== currentViewStart) {
+        setViewStartIndex(clampedStart)
+        setViewEndIndex(clampedEnd)
+      }
+      requestRef.current = undefined; // Reset
+    });
+  }, []) // Empty dependency array = Stable listener!
+
 
   // 鼠标释放结束拖拽
   const handleMouseUp = useCallback(() => {
     setIsDragging(false)
+    dragStateRef.current = { ...dragStateRef.current, isDragging: false };
   }, [])
 
   // 绑定拖拽相关的全局鼠标事件
@@ -1186,7 +1379,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     }
   }, [isDragging, handleMouseMove, handleMouseUp])
 
-  // 滚轮缩放处理函数
+  // 滚轮缩放处理函数 - Optimized with Refs
   const handleWheel = useCallback((e: WheelEvent) => {
     if (!chartContainerRef.current) return
 
@@ -1200,17 +1393,18 @@ function InteractiveChart({ content }: { content: ChartContent }) {
       return
     }
 
-
     // 阻止默认滚动行为
     e.preventDefault()
     e.stopPropagation()
 
-    const containerWidth = rect.width
+    // Access state from Ref to ensure we have latest values without re-binding listener
+    const { startIndex, endIndex, chartLen } = viewStateRef.current;
+    if (chartLen === 0) return;
 
-    // 计算鼠标位置对应的数据点索引（相对于当前视图）
-    const currentRange = viewEndIndex - viewStartIndex + 1
+    const containerWidth = rect.width
+    const currentRange = endIndex - startIndex + 1
     const mousePositionRatio = mouseX / containerWidth
-    const focusIndex = Math.round(viewStartIndex + mousePositionRatio * currentRange)
+    const focusIndex = Math.round(startIndex + mousePositionRatio * currentRange)
 
     // 缩放因子（向上滚动放大，向下滚动缩小）
     const zoomFactor = e.deltaY > 0 ? 1.15 : 0.85
@@ -1218,20 +1412,20 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
     // 限制缩放范围
     const minRange = 5 // 最少显示5个数据点
-    const maxRange = chartData.length // 最多显示全部数据
+    const maxRange = chartLen // 最多显示全部数据
 
     const clampedRange = Math.max(minRange, Math.min(maxRange, newRange))
 
     // 以鼠标位置为中心进行缩放
     const newStartIndex = Math.max(0, Math.min(
-      chartData.length - clampedRange,
+      chartLen - clampedRange,
       Math.round(focusIndex - mousePositionRatio * clampedRange)
     ))
     const newEndIndex = newStartIndex + clampedRange - 1
 
     setViewStartIndex(newStartIndex)
     setViewEndIndex(newEndIndex)
-  }, [viewStartIndex, viewEndIndex, chartData.length])
+  }, []) // Empty dependency array ensures listener is stable!
 
   // 当数据变化时重置视图
   useEffect(() => {
@@ -1250,7 +1444,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
     return () => {
       container.removeEventListener('wheel', handleWheel)
     }
-  }, [handleWheel])
+  }, [handleWheel]) // handleWheel is now stable
 
   // 获取绘图区域边界（排除图例和边距）
   useEffect(() => {
@@ -1370,6 +1564,66 @@ function InteractiveChart({ content }: { content: ChartContent }) {
   // 如果标题包含"预测"，则不显示（因为外层已有"价格走势分析"标题）
   const shouldShowTitle = title && !title.includes('预测')
 
+  // Memoize Ticks to avoid re-calculating on every drag frame
+  const MemoizedTicks = useMemo(() => {
+    if (!anomalyZones || anomalyZones.length === 0) return null;
+
+    // Filter to raw 'plr' zones only
+    return (anomalyZones || [])
+      .filter((z: any) => (z.method || 'plr') === 'plr')
+      .map((zone: any, idx: number) => (
+        <ReferenceLine
+          key={`tick-${idx}`}
+          x={zone.startDate}
+          stroke="rgba(255, 255, 255, 0.1)"
+          strokeDasharray="3 3"
+          label={{ position: 'top', value: '', fill: 'gray', fontSize: 10 }}
+        />
+      ));
+  }, [anomalyZones]);
+
+  // === Performance Optimization: Pre-calculate Snapped Zones ===
+  // Snap semantic regimes to closest valid dates in chartData ONCE.
+  // This solves 2 issues:
+  // 1. Lag: Expensive scanning removed from render loop.
+  // 2. Visibility: Zones on weekends/gaps are now snapped to valid chart dates, so Recharts can render them.
+  const snappedSemanticRegimes = useMemo(() => {
+    if (!useSemanticRegimes || !semanticRegimes || semanticRegimes.length === 0 || !chartData || chartData.length === 0) {
+      return [];
+    }
+
+    // Helper: Binary search for closest date
+
+    const validDates = (chartData.map(d => d.name).filter((n: any) => n) as string[]).sort();
+    const findClosest = (target: string) => {
+      if (!target || validDates.length === 0) return target;
+      let low = 0, high = validDates.length - 1;
+      while (low <= high) {
+        const mid = Math.floor((low + high) / 2);
+        const midVal = validDates[mid];
+        if (midVal === target) return target;
+        if (midVal < target) low = mid + 1;
+        else high = mid - 1;
+      }
+      if (high < 0) return validDates[0];
+      if (low >= validDates.length) return validDates[validDates.length - 1];
+      const d1 = validDates[high];
+      const d2 = validDates[low];
+      // FIX: Ensure non-null before Date conversion
+      const t = new Date(target || '').getTime();
+      const t1 = new Date(d1 || '').getTime();
+      const t2 = new Date(d2 || '').getTime();
+      return (Math.abs(t - t1) < Math.abs(t - t2)) ? d1 : d2;
+    };
+
+    return semanticRegimes.map(regime => ({
+      ...regime,
+      // Snap start/end to valid dates
+      snappedStart: findClosest(regime.startDate),
+      snappedEnd: findClosest(regime.endDate)
+    }));
+  }, [useSemanticRegimes, semanticRegimes, chartData]);
+
   return (
     <div className="mt-2 relative">
       {/* 回测控制UI */}
@@ -1385,23 +1639,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           {shouldShowTitle && (
             <h4 className="text-sm font-medium text-gray-300">{title}</h4>
           )}
-          {/* Trend Algo Selector for Chart */}
-          {anomalyZones && anomalyZones.length > 0 && (
-            <div className="flex items-center bg-dark-600/50 rounded p-0.5 border border-gray-700/50">
-              <button
-                onClick={() => setTrendAlgo('plr')}
-                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-all ${trendAlgo === 'plr' ? 'bg-violet-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
-              >
-                Raw
-              </button>
-              <button
-                onClick={() => setTrendAlgo('semantic')}
-                className={`px-2 py-0.5 text-[10px] font-medium rounded transition-all ${trendAlgo === 'semantic' ? 'bg-violet-500 text-white shadow-sm' : 'text-gray-400 hover:text-gray-200'}`}
-              >
-                Semantic
-              </button>
-            </div>
-          )}
+          {/* Trend Algo Selector Removed - Default to Semantic */}
         </div>
         <div className="flex items-center gap-2">
           {isZoomed && (
@@ -1434,70 +1672,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           {anomalyZones.length} 个重点区域
         </div>
       )}
-      {/* Zone Detail Tooltip (Overlay) */}
-      {activeZone && (
-        <div
-          className="absolute top-10 left-1/2 transform -translate-x-1/2 bg-black/90 border border-gray-700/50 p-4 rounded-lg shadow-2xl z-30 backdrop-blur-md w-[400px] pointer-events-none"
-          style={{ pointerEvents: 'none' }} // Explicit inline style to prevent flickering
-        >
-          {/* Header: Badge + Date Range */}
-          <div className="flex items-center gap-3 mb-4">
-            <div className={`px-2 py-0.5 rounded text-sm font-bold ${(activeZone.avg_return || activeZone.change_pct || 0) >= 0
-              ? 'bg-red-500/20 text-red-500'
-              : 'bg-emerald-500/20 text-emerald-500'
-              }`}>
-              {(activeZone.avg_return || activeZone.change_pct || 0) > 0 ? '+' : ''}{((activeZone.avg_return || activeZone.change_pct || 0) * 100).toFixed(1)}%
-            </div>
-            <div className="text-gray-400 text-xs font-mono">
-              {activeZone.startDate} ~ {activeZone.endDate}
-            </div>
-          </div>
-
-          {/* Event Flow Section */}
-          <div className="flex items-center gap-2 mb-3">
-            <div className="w-1.5 h-1.5 rounded-full bg-violet-500"></div>
-            <span className="text-[10px] uppercase font-bold text-violet-400 tracking-wider">EVENT FLOW</span>
-          </div>
-
-          {/* Timeline List */}
-          <div className="relative pl-2">
-            {/* Vertical Line */}
-            <div className="absolute left-[3px] top-1 bottom-1 w-[1px] bg-gray-800"></div>
-
-            {/* Events */}
-            <div className="space-y-4">
-              {(activeZone.events && activeZone.events.length > 0 ? activeZone.events : [activeZone]).map((ev: any, i: number) => {
-                const evReturn = ev.avg_return || 0; // Or parse from summary if available?
-                const isPos = evReturn >= 0;
-
-                return (
-                  <div key={i} className="relative pl-4">
-                    {/* Dot */}
-                    <div className={`absolute left-0 top-1.5 w-1.5 h-1.5 rounded-full border border-black z-10 ${activeZone.sentiment === 'positive' ? 'bg-red-400' : (activeZone.sentiment === 'negative' ? 'bg-emerald-400' : 'bg-gray-400')
-                      }`}></div>
-
-                    {/* Content */}
-                    <div>
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[10px] text-gray-500 font-mono">{ev.date || ev.startDate}</span>
-                        {Math.abs(evReturn) > 0.001 && (
-                          <span className={`text-[10px] px-1 rounded ${isPos ? 'bg-red-900/30 text-red-400' : 'bg-emerald-900/30 text-emerald-400'}`}>
-                            {isPos ? '+' : ''}{(evReturn * 100).toFixed(1)}%
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-gray-300 leading-snug">
-                        {ev.summary || ev.event_summary || ev.reason}
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </div>
-      )
-      }
+      {/* Zone Detail Tooltip (Overlay) REMOVED - using Hover Tooltip instead */}
 
       {/* 变点详情提示 */}
       {
@@ -1530,8 +1705,18 @@ function InteractiveChart({ content }: { content: ChartContent }) {
           <LineChart
             data={displayData}
             margin={{ top: 5, right: 10, left: 0, bottom: 20 }}
+            onClick={handleChartClick}
+            onMouseMove={(e: any) => {
+              // Update mouse Y for horizontal crosshair
+              if (e && e.activeCoordinate) {
+                setMouseY(e.activeCoordinate.y);
+              }
+            }}
+            onMouseLeave={() => {
+              setMouseY(null);
+            }}
           >
-            <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4a" />
+            <CartesianGrid strokeDasharray="3 3" stroke="#3a3a4a" vertical={false} />
             <XAxis
               dataKey="name"
               stroke="#6b7280"
@@ -1568,6 +1753,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
               width={60}
             />
             <Tooltip
+              content={<CustomTooltip />}
+              offset={20}
+              cursor={{ stroke: 'rgba(255, 255, 255, 0.2)', strokeWidth: 1, strokeDasharray: '5 5' }}
               contentStyle={{
                 backgroundColor: '#1a1a24',
                 border: '1px solid rgba(255, 255, 255, 0.1)',
@@ -1578,6 +1766,59 @@ function InteractiveChart({ content }: { content: ChartContent }) {
             <Legend
               wrapperStyle={{ fontSize: '12px' }}
             />
+            {/* Ticks for Raw Intervals (Vertical Lines) - Rendered only in Semantic Mode (Memoized) */}
+            {trendAlgo === 'semantic' && MemoizedTicks}
+            {/* RAW Interval Ticks (Start/End Markers) - User Request: "Larger ticks on horizontal axis" */}
+            {trendAlgo === 'semantic' && anomalyZones && anomalyZones.length > 0 && (
+              (() => {
+                // Filter for raw zones (method='plr')
+                const rawZones = anomalyZones.filter((z: any) => (z.method || 'plr') === 'plr');
+                return rawZones.map((z: any, i: number) => {
+                  // Ensure visible
+                  if (!displayData || displayData.length === 0) return null;
+                  const viewStart = displayData[0]?.name;
+                  const viewEnd = displayData[displayData.length - 1]?.name;
+
+                  if (!viewStart || !viewEnd) return null;
+                  const validViewStart = viewStart; // Ensure non-null for closure
+                  const validViewEnd = viewEnd;
+
+                  // Helper to render a tick if inside view
+                  const renderTick = (date: string, type: 'start' | 'end') => {
+                    // Check visibility
+                    if (date < validViewStart || date > validViewEnd) return null;
+
+                    // Calculate tick height (at bottom)
+                    // yAxisDomain is available from scope
+                    const [yMin, yMax] = yAxisDomain;
+                    // Ensure yMin/yMax are numbers. If auto/dataMin, this might fail, but yAxisDomain is calculated in this component.
+                    const min = typeof yMin === 'number' ? yMin : 0;
+                    const max = typeof yMax === 'number' ? yMax : 1000; // Fallback
+                    const tickHeight = (max - min) * 0.03;
+
+                    return (
+                      <ReferenceLine
+                        key={`raw-tick-${i}-${type}`}
+                        segment={[
+                          { x: date, y: min },
+                          { x: date, y: min + tickHeight }
+                        ]}
+                        stroke="rgba(255, 255, 255, 0.6)"
+                        strokeWidth={2}
+                      // Solid line for tick
+                      />
+                    )
+                  };
+
+                  return (
+                    <React.Fragment key={`raw-group-${i}`}>
+                      {renderTick(z.startDate, 'start')}
+                      {renderTick(z.endDate, 'end')}
+                    </React.Fragment>
+                  );
+                });
+              })()
+            )}
             {/* 异常区域与悬浮提示 - Bloomberg风格 */}
             {/* 区域渲染逻辑：语义合并 vs 原始分段 */}
             {/* 1. Semantic Regimes: Areas */}
@@ -1585,7 +1826,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
             {/* But we keep order: Zones first, then Dots? Recharts renders in order. */}
             {/* Let's render Zones first. */}
 
-            {useSemanticRegimes && semanticRegimes.map((regime: any, idx: number) => {
+            {useSemanticRegimes && snappedSemanticRegimes.map((regime: any, idx: number) => {
               // CRITICAL FIX: Use sentiment field (from backend) instead of displayType
               // AND PRIORITIZE avg_return for color determination to ensure visual accuracy!
               const returnVal = regime.avg_return !== undefined ? regime.avg_return : 0;
@@ -1609,33 +1850,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
               const uniqueKey = `regime-area-${regime.startDate}-${idx}`;
 
-              // FIX: Find closest valid dates in chartData to prevent gaps (e.g. if zone starts on Sat)
-              const findClosestDate = (targetDate: string) => {
-                if (chartData.find((d: any) => d.name === targetDate)) return targetDate;
-
-                // Sorted chart dates:
-                const chartDates = chartData.map((d: any) => d.name).sort();
-                if (chartDates.length === 0) return targetDate;
-
-                if (targetDate < chartDates[0]) return chartDates[0];
-                if (targetDate > chartDates[chartDates.length - 1]) return chartDates[chartDates.length - 1];
-
-                // Find nearest
-                let closest = chartDates[0];
-                let minDiff = Math.abs(new Date(targetDate).getTime() - new Date(closest).getTime());
-
-                for (let i = 1; i < chartDates.length; i++) {
-                  const diff = Math.abs(new Date(targetDate).getTime() - new Date(chartDates[i]).getTime());
-                  if (diff < minDiff) {
-                    minDiff = diff;
-                    closest = chartDates[i];
-                  }
-                }
-                return closest;
-              };
-
-              const validStart = findClosestDate(regime.startDate);
-              const validEnd = findClosestDate(regime.endDate);
+              // Optmization: Use PRE-CALCULATED snapped dates
+              let validStart = regime.snappedStart || regime.startDate;
+              let validEnd = regime.snappedEnd || regime.endDate;
 
               return (
                 <ReferenceArea
@@ -1655,7 +1872,13 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   onClick={(e) => { e.stopPropagation(); setActiveZone(regime); }}
                 >
                   <Label
-                    value={`${((regime.avg_return || regime.change_pct || 0) * 100).toFixed(2)}%`}
+                    value={`${((() => {
+                      // FIX: Calculate return strictly: (End - Start) / Start
+                      if (regime.startPrice && regime.endPrice) {
+                        return (regime.endPrice - regime.startPrice) / regime.startPrice * 100;
+                      }
+                      return (regime.avg_return || regime.change_pct || 0) * 100;
+                    })()).toFixed(2)}%`}
                     position="top"
                     fill={isPositive ? '#ef4444' : '#22c55e'}
                     fontSize={12}
@@ -1767,9 +1990,9 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   key={uniqueKey}
                   x1={displayStartDate}
                   x2={displayEndDate}
-                  fill={fill} // transparent fill for events
+                  fill={fill || undefined} // use undefined instead of null
                   fillOpacity={fillOpacity}
-                  stroke={stroke}
+                  stroke={stroke || undefined}
                   strokeOpacity={impact}
                   strokeDasharray={strokeDasharray}
                   onMouseEnter={() => {
@@ -1842,7 +2065,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   dataKey="历史供电量"
                   stroke="#a855f7"
                   strokeWidth={2}
-                  dot={{ r: 3 }}
+                  dot={false}
                   activeDot={{ r: 5 }}
                   connectNulls={false}
                   isAnimationActive={false}
@@ -1854,7 +2077,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   stroke="#6b7280"
                   strokeWidth={2}
                   strokeDasharray="5 5"
-                  dot={{ r: 2 }}
+                  dot={false}
                   activeDot={{ r: 4 }}
                   connectNulls={false}
                   isAnimationActive={false}
@@ -1865,7 +2088,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   dataKey="回测预测"
                   stroke="#06b6d4"
                   strokeWidth={2.5}
-                  dot={{ r: 3 }}
+                  dot={false}
                   activeDot={{ r: 5 }}
                   connectNulls={false}
                   isAnimationActive={false}
@@ -1881,7 +2104,7 @@ function InteractiveChart({ content }: { content: ChartContent }) {
                   dataKey={dataset.label}
                   stroke={dataset.color || colors[index % colors.length]}
                   strokeWidth={2}
-                  dot={{ r: 3 }}
+                  dot={false}
                   activeDot={{ r: 5 }}
                   connectNulls={false}
                   isAnimationActive={false}
@@ -1915,14 +2138,12 @@ function InteractiveChart({ content }: { content: ChartContent }) {
 
             {/* 异常点调试日志 (控制台可见) */}
             {(() => {
-              console.log("[MessageContent] Anomalies Prop:", anomalies?.length || 0);
-              console.log("[MessageContent] Visible Anomalies:", visibleAnomalies.length);
-              console.log("[MessageContent] Prediction Zones:", prediction_semantic_zones?.length || 0);
+              // console.log("[MessageContent] Anomalies Prop:", anomalies?.length || 0);
+              // console.log("[MessageContent] Visible Anomalies:", visibleAnomalies.length);
+              // console.log("[MessageContent] Prediction Zones (Prop):", prediction_semantic_zones?.length || 0);
+              // console.log("[MessageContent] Semantic Regimes (Calculated):", semanticRegimes?.length || 0);
               if (anomalies && anomalies.length > 0 && visibleAnomalies.length === 0) {
-                console.warn("[MessageContent] WARNING: Anomalies exist but none are visible! Check date format match.",
-                  "Anomaly Sample:", anomalies[0],
-                  "ChartData Sample:", chartData[0]
-                );
+                // console.warn("[MessageContent] WARNING: Anomalies exist but none are visible!");
               }
               return null;
             })()}

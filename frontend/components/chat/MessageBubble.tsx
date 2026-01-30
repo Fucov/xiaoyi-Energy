@@ -410,11 +410,11 @@ export function MessageBubble({ message, onRegenerateMessage }: MessageBubblePro
                           return value
                         }))
                         influenceData = cleaned as InfluenceAnalysisResult
-                        console.log('[MessageBubble] Parsed new format influence data:', influenceData)
+                        // console.log('[MessageBubble] Parsed new format influence data:', influenceData)
                       } else {
                         // 兼容旧格式
                         legacyInfluenceData = parsed
-                        console.log('[MessageBubble] Parsed legacy format influence data')
+                        // console.log('[MessageBubble] Parsed legacy format influence data')
                       }
                     } catch (e) {
                       console.error('[MessageBubble] Failed to parse influence data:', e, 'Raw match:', influenceMatch[1]?.substring(0, 200))

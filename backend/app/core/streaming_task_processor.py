@@ -33,6 +33,8 @@ from app.services.region_matcher import get_region_matcher
 from app.services.rag_client import check_rag_availability
 from app.services.influence_analyzer import InfluenceAnalyzer
 from app.data.industry_structure_client import get_industry_structure_client
+
+
 from app.services.stock_signal_service import StockSignalService
 
 # Agents
@@ -44,7 +46,7 @@ from app.agents import (
     NewsSummaryAgent,
     PredictionAnalysisAgent,
 )
-from app.services.trend_service import TrendService
+
 
 # Data clients
 from app.data.rag_searcher import RAGSearcher
@@ -65,7 +67,6 @@ from app.core.workflows import (
     run_forecast,
     df_to_points,
     recommend_forecast_params,
-    select_best_model,
 )
 
 
@@ -203,7 +204,6 @@ class StreamingTaskProcessor:
 
             # === Step 2: 区域验证 ===
             region_match_result = None
-            stock_match_result = None  # 保留以兼容
             resolved_keywords = None
 
             # 优先使用region_mention，如果没有则使用stock_mention（兼容旧数据）
@@ -430,10 +430,18 @@ class StreamingTaskProcessor:
         )
         # forecast 模式下强制启用 RAG（UI 始终显示研报来源区域）
         effective_enable_rag = intent.enable_rag or intent.is_forecast
-        rag_available = await check_rag_availability() if effective_enable_rag else False
-        print(f"[RAG] enable_rag={intent.enable_rag}, is_forecast={intent.is_forecast}, effective={effective_enable_rag}, rag_available={rag_available}")
+        rag_available = (
+            await check_rag_availability() if effective_enable_rag else False
+        )
+        print(
+            f"[RAG] enable_rag={intent.enable_rag}, is_forecast={intent.is_forecast}, effective={effective_enable_rag}, rag_available={rag_available}"
+        )
         # 如果意图未提供 RAG 关键词，使用区域名作为 fallback
-        effective_rag_keywords = keywords.rag_keywords if keywords.rag_keywords else [region_name, "供电", "电力需求"]
+        effective_rag_keywords = (
+            keywords.rag_keywords
+            if keywords.rag_keywords
+            else [region_name, "供电", "电力需求"]
+        )
         print(f"[RAG] keywords={effective_rag_keywords}")
         rag_task = (
             asyncio.create_task(
@@ -552,7 +560,9 @@ class StreamingTaskProcessor:
 
         print(f"[RAG] rag_sources count: {len(rag_sources)}")
         if rag_sources:
-            print(f"[RAG] First source: {rag_sources[0].filename} (score={rag_sources[0].score:.3f})")
+            print(
+                f"[RAG] First source: {rag_sources[0].filename} (score={rag_sources[0].score:.3f})"
+            )
             rag_sources = await self._summarize_rag_sources(rag_sources, user_input)
             message.save_rag_sources(rag_sources)
             await self._emit_event(
@@ -565,7 +575,9 @@ class StreamingTaskProcessor:
                 },
             )
         else:
-            print(f"[RAG] No RAG sources found. rag_task was {'created' if rag_task else 'None (skipped)'}")
+            print(
+                f"[RAG] No RAG sources found. rag_task was {'created' if rag_task else 'None (skipped)'}"
+            )
 
         # === 计算异常区域（在Step 3完成前，确保resume时能获取到）===
         print(
@@ -574,7 +586,7 @@ class StreamingTaskProcessor:
         anomaly_zones = []
         try:
             import pandas as pd
-            from app.services.stock_signal_service import StockSignalService
+
             from app.agents.event_summary_agent import EventSummaryAgent
             from app.services.trend_service import TrendService
 
@@ -595,7 +607,8 @@ class StreamingTaskProcessor:
 
             # === Redis 全局缓存检查 ===
             redis_client = get_redis()
-            cache_key = f"power_zones_v3:{region_code}"
+            # FIX: Increment cache version to v4 to invalidate old PLR-based prices (5217 etc)
+            cache_key = f"power_zones_v4:{region_code}"
             cached_zones_json = None
             trend_results = {}  # 初始化，避免缓存命中时 UnboundLocalError
 
@@ -656,7 +669,7 @@ class StreamingTaskProcessor:
                         start_p = float(seg.get("startPrice", 0))
                         end_p = float(seg.get("endPrice", 0))
                         change_pct = (end_p - start_p) / start_p if start_p else 0
-                    except:
+                    except Exception:
                         change_pct = 0
 
                     anomaly_zones.append(
@@ -696,11 +709,41 @@ class StreamingTaskProcessor:
                         sentiment = "negative"
 
                     # Calculate return
+                    # Calculate return
                     try:
+                        # FIX: Lookup actual values from sig_df using NEAREST date to handle weekends/holidays
+                        # Convert column to datetime for nearest search if needed, but string comparison works if format is ISO
+                        # To be safe and efficient:
+
+                        s_date = seg["startDate"]
+                        e_date = seg["endDate"]
+
+                        # Ensure dates are in sig_df for search
+                        if "date_obj" not in sig_df.columns:
+                            sig_df["date_obj"] = pd.to_datetime(sig_df["date"])
+
+                        target_s = pd.to_datetime(s_date)
+                        target_e = pd.to_datetime(e_date)
+
+                        # Find nearest index for start
+                        idx_s = (sig_df["date_obj"] - target_s).abs().idxmin()
+                        # Find nearest index for end
+                        idx_e = (sig_df["date_obj"] - target_e).abs().idxmin()
+
+                        start_p = float(sig_df.loc[idx_s, "close"])
+                        end_p = float(sig_df.loc[idx_e, "close"])
+
+                        # Update the seg dict with actual dates found? No, keep zone dates semantic.
+                        # But maybe we should update startPrice/endPrice to reflect reality.
+
+                        change_pct = (end_p - start_p) / start_p if start_p else 0
+                    except Exception as e:
+                        print(
+                            f"[AnomalyZones] Error calculating semantic return (Nearest): {e}"
+                        )
+                        # Fallback to fitted values
                         start_p = float(seg.get("startPrice", 0))
                         end_p = float(seg.get("endPrice", 0))
-                        change_pct = (end_p - start_p) / start_p if start_p else 0
-                    except:
                         change_pct = 0
 
                     semantic_zones.append(
@@ -718,6 +761,8 @@ class StreamingTaskProcessor:
                             "normalizedType": seg_type,
                             "direction": direction,
                             "events": [],  # Placeholder for events
+                            "startPrice": start_p,
+                            "endPrice": end_p,
                         }
                     )
 
@@ -753,6 +798,8 @@ class StreamingTaskProcessor:
                             "type": seg_type,
                             "normalizedType": seg_type,
                             "direction": direction,
+                            "startPrice": start_p,
+                            "endPrice": end_p,
                         }
                     )
 
@@ -799,12 +846,15 @@ class StreamingTaskProcessor:
 
                         # 改动：不再调用 Tavily 搜索新闻供摘要使用
 
-                        # 生成摘要
-                        event_summary = event_agent.summarize_zone(
-                            zone_dates=zone_dates,
-                            price_change=zone.get("avg_return", 0) * 100,
-                            news_items=[],  # EMPTY
-                            region_name=region_name,
+                        # 生成摘要 (Run in thread pool to avoid blocking async loop)
+                        loop = asyncio.get_running_loop()
+                        event_summary = await loop.run_in_executor(
+                            None,
+                            event_agent.summarize_zone,
+                            zone_dates,
+                            zone.get("avg_return", 0) * 100,
+                            [],  # news_items
+                            region_name,
                         )
 
                         zone["event_summary"] = event_summary
@@ -833,7 +883,7 @@ class StreamingTaskProcessor:
                             )
 
             # ⚠️ 不再过滤无新闻的 zones，保留所有检测到的异常区间
-            anomaly_zones_with_news = anomaly_zones
+            # anomaly_zones_with_news = anomaly_zones
             print(f"[AnomalyZones] Final zones: {len(anomaly_zones)}")
 
             # === 保存到Redis全局缓存 ===
@@ -870,7 +920,9 @@ class StreamingTaskProcessor:
                         },
                     },
                 )
-                print(f"[AnomalyZones] Successfully saved and emitted")
+                print(
+                    f"[AnomalyZones] Successfully saved and emitted: {len(anomaly_zones)} zones"
+                )
 
         except Exception as e:
             import traceback
@@ -967,9 +1019,7 @@ class StreamingTaskProcessor:
         else:
             # 用户指定了模型，使用用户指定的模型
             final_model = user_specified_model
-            model_selection_reason = (
-                f"使用用户指定的 {_MODEL_DISPLAY_NAMES.get(user_specified_model, user_specified_model.upper())} 模型"
-            )
+            model_selection_reason = f"使用用户指定的 {_MODEL_DISPLAY_NAMES.get(user_specified_model, user_specified_model.upper())} 模型"
 
         # 发送模型选择事件（简化版）
         await self._emit_event(
@@ -1005,7 +1055,12 @@ class StreamingTaskProcessor:
 
         # 只对最终选定的模型调用一次 run_forecast
         forecast_result = await run_forecast(
-            df, final_model, max(forecast_horizon, 1), prophet_params, weather_df, region_name
+            df,
+            final_model,
+            max(forecast_horizon, 1),
+            prophet_params,
+            weather_df,
+            region_name,
         )
 
         # 保存并发送预测结果（forecast_result 是 ForecastResult 对象）
@@ -1048,11 +1103,41 @@ class StreamingTaskProcessor:
                     pred_df, method="plr"
                 )
                 pred_plr = pred_trend_results.get("plr", [])
+                print(
+                    f"[AnomalyZones] 🔍 Pred PLR segments: {len(pred_plr)} from {len(pred_df)} points"
+                )
 
                 # 3. 生成 Semantic Regimes
                 pred_semantic = pred_trend_service.process_semantic_regimes(
-                    pred_plr, min_duration_days=3
+                    pred_plr,
+                    min_duration_days=7,  # Increased to 7 to reduce noise/granularity
                 )
+                print(f"[AnomalyZones] 🔍 Pred Semantic segments: {len(pred_semantic)}")
+
+                # Fallback: If no semantic segments found (e.g. linear trend), create one big segment
+                if not pred_semantic and not pred_df.empty:
+                    print(
+                        "[AnomalyZones] ⚠️ No semantic segments found, creating fallback segment"
+                    )
+                    start_date = pred_df["date"].iloc[0]
+                    end_date = pred_df["date"].iloc[-1]
+                    start_price = float(pred_df["close"].iloc[0])
+                    end_price = float(pred_df["close"].iloc[-1])
+                    change_pct = (
+                        (end_price - start_price) / start_price if start_price else 0
+                    )
+
+                    pred_semantic = [
+                        {
+                            "startDate": start_date,
+                            "endDate": end_date,
+                            "startPrice": start_price,
+                            "endPrice": end_price,
+                            "type": "bull" if change_pct >= 0 else "bear",
+                            "direction": "up" if change_pct >= 0 else "down",
+                            "events": [],
+                        }
+                    ]
 
                 # 4. 转换为 anomaly_zones 格式
                 pred_zones = []
@@ -1072,7 +1157,7 @@ class StreamingTaskProcessor:
                         start_p = float(seg.get("startPrice", 0))
                         end_p = float(seg.get("endPrice", 0))
                         change_pct = (end_p - start_p) / start_p if start_p else 0
-                    except:
+                    except Exception:
                         change_pct = 0
 
                     pred_zones.append(
@@ -1091,6 +1176,8 @@ class StreamingTaskProcessor:
                             "direction": direction,
                             "events": seg.get("events", []),
                             "is_prediction": True,
+                            "startPrice": start_p,
+                            "endPrice": end_p,
                         }
                     )
 
@@ -1098,8 +1185,37 @@ class StreamingTaskProcessor:
 
                 # 5. 合并并发送更新
                 if pred_zones:
+                    # NEW: Enrich with Deepseek Analysis
+                    print(
+                        f"[AnomalyZones] 🔮 Analyzing {len(pred_zones)} prediction zones with Deepseek..."
+                    )
+
+                    async def enrich_pred_zone(zone):
+                        try:
+                            # Call the new agent method (running sync method in thread)
+                            reason = await asyncio.to_thread(
+                                self.prediction_analysis_agent.analyze_prediction_zone,
+                                zone,
+                                region_name,
+                            )
+                            # Update fields
+                            zone["event_summary"] = reason
+                            zone["reason"] = reason
+                            # Also update summary if it was just a label
+                            zone["summary"] = f"{zone['summary']}\n{reason}"
+                            return zone
+                        except Exception as e:
+                            print(
+                                f"[AnomalyZones] Analysis failed for zone {zone['startDate']}: {e}"
+                            )
+                            return zone
+
+                    # Run concurrently
+                    enrich_tasks = [enrich_pred_zone(z) for z in pred_zones]
+                    pred_zones = await asyncio.gather(*enrich_tasks)
+
                     # 确保 anomaly_zones 包含所有历史 + 预测
-                    # 此时 anomaly_zones 包含历史。Append directy.
+                    # 此时 anomaly_zones 包含历史。Append directly.
                     # Copy to avoid weird reference issues if looping
                     combined_zones = anomaly_zones + pred_zones
 
@@ -1132,7 +1248,9 @@ class StreamingTaskProcessor:
             message,
             {"type": "step_complete", "step": 5, "data": {"metrics": metrics_dict}},
         )
-        message.update_step_detail(5, "completed", f"{display_model_name} 预测完成 ({metrics_info})")
+        message.update_step_detail(
+            5, "completed", f"{display_model_name} 预测完成 ({metrics_info})"
+        )
 
         # 保存模型名称到 MessageData（使用最终选定的模型）
         message.save_model_name(final_model)
@@ -1425,7 +1543,7 @@ class StreamingTaskProcessor:
             context_parts.append("引用时请使用格式：（来源：《报告名称》，第N页）")
             for source in results["rag"][:5]:
                 # 去除 .pdf 后缀，清理文件名作为报告名称
-                report_name = source.filename.replace('.pdf', '').replace('.PDF', '')
+                report_name = source.filename.replace(".pdf", "").replace(".PDF", "")
                 context_parts.append(
                     f"《{report_name}》第{source.page}页：{source.content_snippet}"
                 )
@@ -1434,9 +1552,9 @@ class StreamingTaskProcessor:
             context_parts.append("\n=== 网络搜索 ===")
             context_parts.append("引用时请使用格式：[新闻标题](URL)")
             for item in results["search"][:5]:
-                title = item.get('title', '')
-                url = item.get('url', '')
-                content = item.get('content', '')[:150]
+                title = item.get("title", "")
+                url = item.get("url", "")
+                content = item.get("content", "")[:150]
                 context_parts.append(f"标题: {title}\n链接: {url}\n内容: {content}")
 
         if "domain" in results and results["domain"]:
@@ -1458,7 +1576,9 @@ class StreamingTaskProcessor:
         message.save_conclusion(answer)
 
         if "rag" in results:
-            results["rag"] = await self._summarize_rag_sources(results["rag"], user_input)
+            results["rag"] = await self._summarize_rag_sources(
+                results["rag"], user_input
+            )
             message.save_rag_sources(results["rag"])
             await self._emit_event(
                 event_queue,
@@ -1549,7 +1669,7 @@ class StreamingTaskProcessor:
         if power_df is None or power_df.empty or weather_df is None or weather_df.empty:
             default_result = InfluenceAnalyzer._get_default_result()
             default_result["overall_score"] = 0.0
-            print(f"[Influence] 数据不足，发送默认影响因子")
+            print(f"[Influence] 数据不足，发送默认影响因子 (Score=0.0)")
             await self._emit_event(
                 event_queue,
                 message,
@@ -1570,9 +1690,6 @@ class StreamingTaskProcessor:
             start_date = start_date.tz_localize(None)
         if hasattr(end_date, "tz") and end_date.tz is not None:
             end_date = end_date.tz_localize(None)
-
-        start_date_str = start_date.strftime("%Y-%m-%d")
-        end_date_str = end_date.strftime("%Y-%m-%d")
 
         # 创建空的节假日数据（已废弃，保留以兼容接口）
         holiday_df = pd.DataFrame(columns=["date", "is_holiday", "holiday_score"])
@@ -1642,7 +1759,9 @@ class StreamingTaskProcessor:
                 "data": influence_result,
             },
         )
-        print(f"[Influence] 影响因子数据已发送并保存到Redis")
+        print(
+            f"[Influence] 影响因子数据已发送并保存到Redis: {influence_result.get('overall_score', 0)}"
+        )
 
         return influence_result
 
@@ -1798,16 +1917,14 @@ class StreamingTaskProcessor:
 
     # ========== 辅助方法 ==========
 
-    async def _summarize_rag_sources(
-        self, rag_sources: list, user_query: str
-    ) -> list:
+    async def _summarize_rag_sources(self, rag_sources: list, user_query: str) -> list:
         """用 LLM 批量总结 RAG 研报片段，将原始文本替换为精炼摘要"""
         if not rag_sources:
             return rag_sources
 
         snippets_text = ""
         for i, src in enumerate(rag_sources):
-            snippets_text += f"[{i+1}] 文件: {src.filename} | 第{src.page}页\n{src.content_snippet}\n\n"
+            snippets_text += f"[{i + 1}] 文件: {src.filename} | 第{src.page}页\n{src.content_snippet}\n\n"
 
         prompt = f"""用户问题: {user_query}
 
